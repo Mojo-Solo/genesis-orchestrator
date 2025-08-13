@@ -1,0 +1,154 @@
+# GENESIS Orchestrator BDD Testing Dependencies
+# Core BDD Framework Dependencies
+
+# Behave - Main BDD framework for Python
+behave>=1.2.6,<2.0.0
+
+# Test assertion and mocking libraries
+pytest>=7.4.0,<8.0.0
+pytest-cov>=4.1.0,<5.0.0
+pytest-mock>=3.11.0,<4.0.0
+
+# String distance calculation for stability testing
+python-Levenshtein>=0.21.0,<1.0.0
+
+# Data handling and analysis
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<2.0.0
+
+# JSON and configuration handling  
+jsonschema>=4.17.0,<5.0.0
+pyyaml>=6.0,<7.0
+
+# HTTP and networking for webhook testing
+requests>=2.31.0,<3.0.0
+urllib3>=1.26.0,<3.0.0
+
+# Cryptography for security testing (HMAC, etc.)
+cryptography>=41.0.0,<42.0.0
+
+# Time and date handling
+python-dateutil>=2.8.0,<3.0.0
+
+# Logging and structured output
+structlog>=23.1.0,<24.0.0
+
+# Statistical analysis for performance testing
+scipy>=1.10.0,<2.0.0
+
+# Mock and test data generation
+factory-boy>=3.3.0,<4.0.0
+faker>=19.0.0,<20.0.0
+
+# Configuration management
+python-dotenv>=1.0.0,<2.0.0
+
+# JSON Lines for execution trace handling
+jsonlines>=3.1.0,<4.0.0
+
+# Enhanced assertions and test utilities
+assertpy>=1.1,<2.0
+
+# Progress reporting and CLI enhancements  
+tqdm>=4.65.0,<5.0.0
+click>=8.1.0,<9.0.0
+
+# Memory profiling for performance tests
+memory-profiler>=0.61.0,<1.0.0
+psutil>=5.9.0,<6.0.0
+
+# Optional: Enhanced output formatters
+allure-behave>=2.13.0,<3.0.0  # For detailed test reporting
+pytest-html>=3.2.0,<4.0.0     # For HTML test reports
+
+# Development and debugging tools (optional)
+ipdb>=0.13.0,<1.0.0           # Enhanced debugger
+rich>=13.0.0,<14.0.0          # Rich console output
+
+# Type checking support (optional but recommended)
+mypy>=1.5.0,<2.0.0
+types-requests>=2.31.0
+types-PyYAML>=6.0.5
+
+# Code formatting and linting (optional)
+black>=23.7.0,<24.0.0
+isort>=5.12.0,<6.0.0
+flake8>=6.0.0,<7.0.0
+
+# Documentation generation (optional)
+sphinx>=7.1.0,<8.0.0
+sphinx-rtd-theme>=1.3.0,<2.0.0
+
+# Performance monitoring (optional)
+py-spy>=0.3.0,<1.0.0
+
+# Database testing utilities (if needed)
+sqlalchemy>=2.0.0,<3.0.0     # For database mocking
+sqlite3                       # Built-in, for test databases
+
+# Async testing support (if async features are tested)
+pytest-asyncio>=0.21.0,<1.0.0
+
+# Environment variable management
+environs>=9.5.0,<10.0.0
+
+# Additional testing utilities
+parameterized>=0.9.0,<1.0.0  # For parameterized tests
+freezegun>=1.2.0,<2.0.0      # For time-based testing
+
+# Network simulation and mocking
+responses>=0.23.0,<1.0.0     # HTTP request mocking
+httpretty>=1.1.0,<2.0.0      # HTTP mocking alternative
+
+# File system testing utilities
+pyfakefs>=5.2.0,<6.0.0       # Fake file system
+
+# JSON Path querying for complex assertions
+jsonpath-ng>=1.5.0,<2.0.0
+
+# Configuration file validation
+cerberus>=1.3.0,<2.0.0
+
+# Enhanced string matching and pattern testing
+regex>=2023.6.0,<2024.0.0
+
+# Process management for integration testing
+subprocess32>=3.5.0,<4.0.0; python_version<"3.3"
+
+# Security testing utilities
+bandit>=1.7.0,<2.0.0         # Security linting
+
+# Performance benchmarking
+pytest-benchmark>=4.0.0,<5.0.0
+
+# Retry mechanisms for flaky tests
+tenacity>=8.2.0,<9.0.0
+
+# Parallel test execution
+pytest-xdist>=3.3.0,<4.0.0
+
+# Test data fixtures
+pytest-fixtures>=0.1.0
+
+# Enhanced diff utilities for assertion messages  
+deepdiff>=6.3.0,<7.0.0
+
+# XML/HTML parsing for report analysis
+beautifulsoup4>=4.12.0,<5.0.0
+lxml>=4.9.0,<5.0.0
+
+# Image processing (if visual testing is needed)
+Pillow>=10.0.0,<11.0.0
+
+# Machine learning libraries (for meta-learning testing)
+scikit-learn>=1.3.0,<2.0.0
+
+# Natural language processing (for text similarity testing)
+nltk>=3.8.0,<4.0.0
+
+# Additional development tools
+pre-commit>=3.3.0,<4.0.0     # Git hooks for code quality
+
+# Note: Install with: pip install -r requirements.txt
+# For development: pip install -r requirements.txt -e .
+# For CI/CD: pip install -r requirements.txt --no-dev
