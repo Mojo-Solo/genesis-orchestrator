@@ -1,0 +1,23 @@
+{
+  "beta_base": 512,
+  "beta_role": {
+    "Planner": 1536,
+    "Retriever": 1024,
+    "Solver": 1024,
+    "Critic": 1024,
+    "Verifier": 1536,
+    "Rewriter": 768
+  },
+  "importance": {
+    "signals": [
+      "role_keywords",
+      "task_stage",
+      "recency"
+    ],
+    "tie_breaker": "id"
+  },
+  "semantic_filter": {
+    "topk": 12,
+    "min_sim": 0.35
+  }
+}

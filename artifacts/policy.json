@@ -1,0 +1,19 @@
+{
+  "auth": {
+    "mode": "PROTECTED",
+    "mfa_required": true
+  },
+  "pii": {
+    "redact": true,
+    "retention_days": 30
+  },
+  "webhooks": {
+    "hmac": {
+      "verify_raw_body": true,
+      "clock_skew_sec": 300
+    }
+  },
+  "rate_limits": {
+    "per_min": 60
+  }
+}

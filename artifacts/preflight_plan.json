@@ -1,0 +1,7 @@
+{
+  "steps": [],
+  "terminators": {
+    "max_depth": 4,
+    "max_steps": 12
+  }
+}

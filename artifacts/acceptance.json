@@ -1,0 +1,45 @@
+{
+  "tests": [
+    {
+      "name": "lag-hotpotaqa",
+      "input": "Q...",
+      "oracle": "A...",
+      "expect": {
+        "accuracy": 1.0,
+        "plan_order": "exact",
+        "terminator": false
+      }
+    },
+    {
+      "name": "terminator-trip",
+      "input": "Q-impossible",
+      "expect": {
+        "terminator": true,
+        "steps_max": "<=3"
+      }
+    },
+    {
+      "name": "rcr-savings",
+      "input": "Q...",
+      "compare": [
+        "full",
+        "static",
+        "rcr"
+      ],
+      "expect": {
+        "rcr.tokens": "< baseline",
+        "rcr.quality": ">= baseline"
+      }
+    },
+    {
+      "name": "stability-98_6",
+      "input": "Q...",
+      "runs": 5,
+      "expect": {
+        "plan": "equivalent",
+        "route": "equivalent",
+        "answer_diff": "<=1.4%"
+      }
+    }
+  ]
+}
