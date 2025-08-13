@@ -92,20 +92,12 @@ jobs:
       - name: Run LAG Tests
         run: |
           echo "Running LAG decomposition tests..."
-          # Stub: Would invoke actual planner agent
-          cat > ${{ needs.preflight.outputs.artifacts_path }}/preflight_plan.json << 'EOF'
-          {
-            "plan_id": "${{ env.RUN_ID }}",
-            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-            "original_query": "test_query",
-            "decomposition": [
-              {"step": 1, "sub_question": "sub_q1", "dependencies": []},
-              {"step": 2, "sub_question": "sub_q2", "dependencies": ["1"]}
-            ],
-            "terminator": false,
-            "estimated_tokens": 500
-          }
-          EOF
+          # Use the orchestrator script
+          bash scripts/run-orchestrator.sh \
+            --mode full \
+            --input "What is the capital of France?" \
+            --out ${{ needs.preflight.outputs.artifacts_path }} \
+            --run ${{ env.RUN_ID }}
           
       - name: Validate Plan Structure
         run: |
@@ -127,22 +119,23 @@ jobs:
       - name: Run RCR Router
         run: |
           echo "Testing RCR routing efficiency..."
-          # Stub: Would run actual router
-          cat > ${{ needs.preflight.outputs.artifacts_path }}/router_metrics.json << 'EOF'
-          {
-            "algorithm": "RCR",
-            "total_tokens": 3500,
-            "baseline_tokens": 5000,
-            "efficiency_gain": 0.3,
-            "latency_p50_ms": 150,
-            "latency_p95_ms": 250,
-            "routes": [
-              {"agent": "planner", "tokens": 1400},
-              {"agent": "solver", "tokens": 900},
-              {"agent": "verifier", "tokens": 1200}
-            ]
-          }
-          EOF
+          # Run with RCR mode for efficiency comparison
+          bash scripts/run-orchestrator.sh \
+            --mode rcr \
+            --input "What is the capital of France?" \
+            --out ${{ needs.preflight.outputs.artifacts_path }}/rcr \
+            --run ${{ env.RUN_ID }}-rcr
+          
+          # Also run baseline for comparison
+          bash scripts/run-orchestrator.sh \
+            --mode full \
+            --input "What is the capital of France?" \
+            --out ${{ needs.preflight.outputs.artifacts_path }}/full \
+            --run ${{ env.RUN_ID }}-full
+          
+          # Copy RCR metrics to expected location
+          cp ${{ needs.preflight.outputs.artifacts_path }}/rcr/router_metrics.json \
+             ${{ needs.preflight.outputs.artifacts_path }}/router_metrics.json
           
       - name: Assert Efficiency Targets
         run: |
