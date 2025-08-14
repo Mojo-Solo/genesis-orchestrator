@@ -64,6 +64,19 @@ async def preflight_activity(request: OrchestrationRequest) -> Dict[str, Any]:
     }
 
 @activity.defn
+async def load_router_config_activity(config_path: str) -> Dict[str, Any]:
+    """Load router configuration from file (activity for determinism)."""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Return default config if file not found
+        return {"beta_base": 512, "beta_role": {}}
+    except Exception as e:
+        # Log error and return default
+        return {"beta_base": 512, "beta_role": {}, "error": str(e)}
+
+@activity.defn
 async def plan_activity(query: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """LAG decomposition planning with deterministic step graph."""
     rng_seed = GENESIS_SEED
@@ -378,13 +391,14 @@ class GenesisOrchestrationWorkflow:
         )
         
         # Phase 2: Planning (LAG)
-        # Load router config deterministically
-        config: Dict[str, Any] = {}
-        try:
-            with open(request.config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        except FileNotFoundError:
-            config = {"beta_base": 512, "beta_role": {}}
+        # Load router config via activity (for determinism)
+        config = await workflow.execute_activity(
+            load_router_config_activity,
+            request.config_path,
+            start_to_close_timeout=DEFAULT_TIMEOUT,
+            retry_policy=retry_policy
+        )
+        
         plan = await workflow.execute_activity(
             plan_activity,
             request.query,

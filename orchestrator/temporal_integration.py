@@ -496,9 +496,12 @@ class ParallelExecutionWorkflow:
 class TemporalOrchestrationWorker:
     """Worker that runs Temporal workflows and activities."""
     
-    def __init__(self, temporal_host: str = "localhost:7233", 
+    def __init__(self, temporal_host: Optional[str] = None, 
                  orchestrator_config: Optional[str] = None):
-        self.temporal_host = temporal_host
+        import os
+        self.temporal_host = temporal_host or os.getenv("TEMPORAL_HOST", "localhost:7233")
+        self.temporal_namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
+        self.task_queue = os.getenv("TEMPORAL_TASK_QUEUE", "genesis-orchestrator-queue")
         self.orchestrator_config = orchestrator_config
         self.client: Optional[Client] = None
         self.worker: Optional[Worker] = None
@@ -509,12 +512,12 @@ class TemporalOrchestrationWorker:
         init_orchestrator(self.orchestrator_config)
         
         # Connect to Temporal
-        self.client = await Client.connect(self.temporal_host)
+        self.client = await Client.connect(self.temporal_host, namespace=self.temporal_namespace)
         
         # Create worker
         self.worker = Worker(
             self.client,
-            task_queue="orchestrator-tasks",
+            task_queue=self.task_queue,
             workflows=[OrchestratorWorkflow, ParallelExecutionWorkflow],
             activities=[
                 route_task_activity,
@@ -546,13 +549,16 @@ class TemporalOrchestrationWorker:
 class TemporalOrchestrationClient:
     """Client for submitting tasks to Temporal orchestrator."""
     
-    def __init__(self, temporal_host: str = "localhost:7233"):
-        self.temporal_host = temporal_host
+    def __init__(self, temporal_host: Optional[str] = None):
+        import os
+        self.temporal_host = temporal_host or os.getenv("TEMPORAL_HOST", "localhost:7233")
+        self.temporal_namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
+        self.task_queue = os.getenv("TEMPORAL_TASK_QUEUE", "genesis-orchestrator-queue")
         self.client: Optional[Client] = None
         
     async def connect(self):
         """Connect to Temporal."""
-        self.client = await Client.connect(self.temporal_host)
+        self.client = await Client.connect(self.temporal_host, namespace=self.temporal_namespace)
     
     async def submit_task(self, request: Dict[str, Any], 
                          parallel: bool = False) -> TemporalTaskResult:
@@ -580,7 +586,7 @@ class TemporalOrchestrationClient:
             workflow_class.run,
             temporal_request,
             id=f"orchestrator-{temporal_request.id}",
-            task_queue="orchestrator-tasks"
+            task_queue=self.task_queue
         )
         
         # Wait for result

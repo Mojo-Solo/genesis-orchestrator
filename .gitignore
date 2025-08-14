@@ -39,3 +39,39 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# Artifacts (generated at runtime)
+artifacts/*.json
+artifacts/*.ndjson
+artifacts/*.md
+artifacts/*.txt
+!artifacts/.gitkeep
+
+# Temporal
+temporal-data/
+
+# Security
+*.pem
+*.key
+*.crt
+*.p12
+
+# Database
+*.sqlite
+*.db
+
+# Cache
+.cache/
+*.cache
+.pytest_cache/

@@ -37,12 +37,12 @@ class HealthController extends Controller
         }
 
         // Check router configuration
-        $routerConfigPath = base_path('config/router.config.json');
+        $routerConfigPath = base_path('config/router_config.json');  // Fixed filename
         if (File::exists($routerConfigPath)) {
             $routerConfig = json_decode(File::get($routerConfigPath), true);
-            if ($routerConfig && isset($routerConfig['version'])) {
+            if ($routerConfig && isset($routerConfig['router_version'])) {  // Fixed key name
                 $checks['router'] = 'healthy';
-                $checks['router_version'] = $routerConfig['version'];
+                $checks['router_version'] = $routerConfig['router_version'];
             } else {
                 $checks['router'] = 'invalid_config';
                 $allHealthy = false;
