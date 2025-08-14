@@ -177,7 +177,7 @@ Feature: Meta-Learning Cycle Validation
 
   @meta-learning @rollback @safety
   Scenario: Safe rollback mechanism for failed improvements
-    Given a meta-learning improvement has been deployed
+    Given a meta-learning improvement has been deployed (monitoring configured)
     And performance monitoring detects degradation
     When rollback conditions are met
     Then automatic rollback should be triggered:

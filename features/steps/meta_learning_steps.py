@@ -220,7 +220,7 @@ def step_setup_performance_variance(context):
     }
 
 
-@given('a meta-learning improvement has been deployed')
+@given('a meta-learning improvement has been deployed (monitoring configured)')
 def step_setup_deployed_improvement_monitoring(context):
     """Setup deployed improvement for monitoring."""
     context.deployed_improvement_monitor = {

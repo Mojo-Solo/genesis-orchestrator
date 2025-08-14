@@ -226,9 +226,11 @@ class MockTraceCollector:
     pass
 
 
-# Update the genesis_test_framework module alias
+# Update the genesis_test_framework module alias (avoid aliasing to builtins)
 import sys
-sys.modules['genesis_test_framework'] = sys.modules[__name__]
+_self_module = sys.modules.get(__name__)
+if _self_module is not None and __name__ != 'builtins':
+    sys.modules['genesis_test_framework'] = _self_module
 
 # Export all classes for use in step definitions
 __all__ = [

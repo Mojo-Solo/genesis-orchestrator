@@ -1,0 +1,202 @@
+{
+  "router_version": "2.0",
+  "router_type": "unified_mcp_orchestrator",
+  "description": "Unified MCP Orchestrator routing configuration with GENESIS integration",
+  
+  "beta_base": 512,
+  "beta_role": {
+    "Planner": 1536,
+    "Retriever": 1024,
+    "Solver": 1024,
+    "Critic": 1024,
+    "Verifier": 1536,
+    "Rewriter": 768,
+    "RevoExecutor": 2048,
+    "BMADPlanner": 2048,
+    "ClaudeScrumMaster": 1536,
+    "Consult7": 2048,
+    "Context7": 1536,
+    "Serena": 1536,
+    "CucumberBDD": 1024,
+    "Playwright": 1024,
+    "DatabaseManager": 1024,
+    "SecurityMonitor": 1536,
+    "MetaLearning": 2048
+  },
+  
+  "importance": {
+    "signals": ["keyword_match", "recency", "frequency", "relevance_score"],
+    "weights": {
+      "keyword_match": 0.4,
+      "recency": 0.2,
+      "frequency": 0.2,
+      "relevance_score": 0.2
+    },
+    "tie_breaker": "id"
+  },
+  
+  "semantic_filter": {
+    "enabled": true,
+    "topk": 12,
+    "min_similarity": 0.7,
+    "embedding_model": "text-embedding-3-small"
+  },
+  
+  "agent_categories": {
+    "deployment": {
+      "priority": 1,
+      "agents": ["ultimate_deployment_orchestrator", "deploy_agent"],
+      "keywords": ["deploy", "release", "rollout", "blue-green", "canary"]
+    },
+    "monitoring": {
+      "priority": 2,
+      "agents": ["projectwe_monitoring", "infrastructure_monitoring"],
+      "keywords": ["monitor", "metrics", "alerts", "observability", "health"]
+    },
+    "security": {
+      "priority": 1,
+      "agents": ["security_monitoring", "security_compliance"],
+      "keywords": ["security", "vulnerability", "compliance", "audit", "scan"]
+    },
+    "intelligence": {
+      "priority": 2,
+      "agents": ["bmad_planner", "claude_scrum_master", "general_purpose"],
+      "keywords": ["plan", "design", "architecture", "sprint", "agile"]
+    },
+    "automation": {
+      "priority": 3,
+      "agents": ["revo_executor", "desktop_commander"],
+      "keywords": ["automate", "generate", "code", "refactor", "cli"]
+    },
+    "integration": {
+      "priority": 3,
+      "agents": ["db_manager", "api_designer"],
+      "keywords": ["database", "api", "integration", "migration", "sync"]
+    },
+    "analysis": {
+      "priority": 2,
+      "agents": ["consult7_agent", "context7_agent", "serena_agent"],
+      "keywords": ["analyze", "review", "assess", "evaluate", "inspect"]
+    },
+    "testing": {
+      "priority": 2,
+      "agents": ["cucumber_bdd_architect", "playwright_agent", "testing_strategist"],
+      "keywords": ["test", "bdd", "e2e", "scenario", "coverage"]
+    },
+    "meta_learning": {
+      "priority": 3,
+      "agents": ["meta_learning_engine"],
+      "keywords": ["optimize", "learn", "improve", "adapt", "performance"]
+    }
+  },
+  
+  "routing_strategies": {
+    "primary": "intent_based",
+    "fallback": "keyword_matching",
+    "enable_parallel": true,
+    "max_parallel_agents": 5
+  },
+  
+  "execution_policies": {
+    "max_retries": 3,
+    "retry_backoff": "exponential",
+    "timeout_ms": {
+      "default": 60000,
+      "analysis": 120000,
+      "deployment": 300000,
+      "testing": 180000
+    },
+    "circuit_breaker": {
+      "enabled": true,
+      "failure_threshold": 5,
+      "reset_timeout_ms": 60000
+    }
+  },
+  
+  "quality_gates": {
+    "pre_execution": {
+      "validate_context": true,
+      "check_dependencies": true,
+      "verify_permissions": true
+    },
+    "post_execution": {
+      "validate_output": true,
+      "check_errors": true,
+      "verify_artifacts": true
+    }
+  },
+  
+  "monitoring_config": {
+    "metrics_enabled": true,
+    "tracing_enabled": true,
+    "sampling_rate": 1.0,
+    "export_interval_seconds": 30,
+    "retention_days": 7
+  },
+  
+  "genesis_integration": {
+    "enabled": true,
+    "lag_engine": {
+      "max_depth": 5,
+      "cognitive_threshold": 0.8,
+      "terminator_conditions": [
+        "UNANSWERABLE",
+        "CONTRADICTION",
+        "LOW_SUPPORT"
+      ]
+    },
+    "rcr_router": {
+      "algorithm": "RCR",
+      "efficiency_target": 0.3,
+      "selection_strategy": "greedy"
+    },
+    "stability": {
+      "target": 0.986,
+      "deterministic_seed": 42,
+      "max_temperature": 0.1
+    }
+  },
+  
+  "agent_health_checks": {
+    "interval_seconds": 30,
+    "timeout_ms": 5000,
+    "unhealthy_threshold": 3,
+    "healthy_threshold": 2
+  },
+  
+  "load_balancing": {
+    "strategy": "round_robin",
+    "sticky_sessions": false,
+    "health_check_enabled": true
+  },
+  
+  "security": {
+    "authentication_required": true,
+    "authorization_enabled": true,
+    "rate_limiting": {
+      "enabled": true,
+      "requests_per_minute": 100,
+      "burst_size": 20
+    },
+    "audit_logging": true,
+    "encryption_in_transit": true
+  },
+  
+  "meta_learning_config": {
+    "enabled": true,
+    "learning_rate": 0.01,
+    "batch_size": 50,
+    "update_interval_minutes": 60,
+    "performance_metrics": [
+      "accuracy",
+      "latency",
+      "token_usage",
+      "success_rate"
+    ],
+    "optimization_targets": {
+      "latency_reduction": 0.1,
+      "accuracy_improvement": 0.02,
+      "token_efficiency": 0.05
+    }
+  }
+}
