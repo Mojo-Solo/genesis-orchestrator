@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: genesis-orchestrator
+  labels:
+    name: genesis-orchestrator
+    environment: production
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: namespace
+    app.kubernetes.io/part-of: genesis-platform
+    app.kubernetes.io/managed-by: kubernetes
+  annotations:
+    prometheus.io/scrape: "true"
+    monitoring.coreos.com/enabled: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: genesis-staging
+  labels:
+    name: genesis-staging
+    environment: staging
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: namespace
+    app.kubernetes.io/part-of: genesis-platform
+    app.kubernetes.io/managed-by: kubernetes
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: genesis-development
+  labels:
+    name: genesis-development
+    environment: development
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: namespace
+    app.kubernetes.io/part-of: genesis-platform
+    app.kubernetes.io/managed-by: kubernetes

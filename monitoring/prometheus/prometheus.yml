@@ -1,0 +1,140 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'genesis-orchestrator'
+    environment: 'production'
+    version: '1.0.0'
+  
+  # Production-grade storage settings
+  query_log_file: '/var/log/prometheus/queries.log'
+
+rule_files:
+  - "alert_rules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # Genesis Orchestrator API metrics - Enhanced for production
+  - job_name: 'genesis-orchestrator'
+    scrape_interval: 5s  # More frequent for critical metrics
+    metrics_path: '/health/metrics'
+    static_configs:
+      - targets: ['localhost:8000']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'genesis-orchestrator'
+    scrape_timeout: 3s
+    metric_relabel_configs:
+      # Add production labels
+      - source_labels: [__name__]
+        target_label: service
+        replacement: 'genesis-orchestrator'
+      # Drop high-cardinality debug metrics in production
+      - source_labels: [__name__]
+        regex: '.*_debug_.*'
+        action: drop
+
+  # Health check endpoints
+  - job_name: 'genesis-health'
+    scrape_interval: 5s
+    metrics_path: '/health/ready'
+    static_configs:
+      - targets: ['localhost:8000']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'genesis-health'
+
+  # System metrics via node_exporter
+  - job_name: 'node-exporter'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9100']
+
+  # Database metrics
+  - job_name: 'mysql-exporter'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9104']
+
+  # Redis metrics
+  - job_name: 'redis-exporter'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9121']
+
+  # PHP-FPM metrics
+  - job_name: 'php-fpm-exporter'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9253']
+
+  # Nginx metrics
+  - job_name: 'nginx-exporter'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9113']
+
+  # Custom Genesis Monitor metrics
+  - job_name: 'genesis-monitor'
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['localhost:9090']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'genesis-monitor'
+
+  # MCP Server metrics (if available)
+  - job_name: 'mcp-servers'
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['localhost:3001', 'localhost:3002', 'localhost:3003']
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: 'localhost:(\d+)'
+        target_label: mcp_server
+        replacement: 'mcp-${1}'
+
+  # Temporal metrics (if configured)
+  - job_name: 'temporal'
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['localhost:7233']
+    honor_labels: true
+
+  # Application-level metrics with custom endpoints
+  - job_name: 'genesis-app-metrics'
+    scrape_interval: 10s
+    metrics_path: '/api/metrics/application'
+    static_configs:
+      - targets: ['localhost:8000']
+    params:
+      format: ['prometheus']
+
+  # Business metrics for SLA tracking
+  - job_name: 'genesis-business-metrics'
+    scrape_interval: 30s
+    metrics_path: '/api/metrics/business'
+    static_configs:
+      - targets: ['localhost:8000']
+    params:
+      format: ['prometheus']
+
+  # Security metrics
+  - job_name: 'genesis-security-metrics'
+    scrape_interval: 60s
+    metrics_path: '/api/metrics/security'
+    static_configs:
+      - targets: ['localhost:8000']
+    params:
+      format: ['prometheus']

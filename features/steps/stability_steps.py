@@ -170,9 +170,9 @@ def step_setup_error_trigger_test(context):
     context.expected_error_type = "DivisionByZeroError"
 
 
-@given('I have documents with identical importance scores')
+@given('I have documents with identical importance scores for stability testing')
 def step_setup_identical_score_documents(context):
-    """Setup documents with identical importance scores."""
+    """Setup documents with identical importance scores for stability testing."""
     context.tied_score_documents = context.test_context.create_identical_score_documents()
     context.stability_tester.set_memory_store(context.tied_score_documents)
 

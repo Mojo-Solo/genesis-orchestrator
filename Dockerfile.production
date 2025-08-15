@@ -1,0 +1,145 @@
+# GENESIS Orchestrator Production Dockerfile
+# Multi-stage build for optimal production deployment
+
+# ============================================================================
+# STAGE 1: Build Stage
+# ============================================================================
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    git \
+    curl \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /build
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt requirements-production.txt ./
+RUN pip install --no-cache-dir --user -r requirements-production.txt
+
+# ============================================================================
+# STAGE 2: PHP/Laravel Build Stage  
+# ============================================================================
+FROM php:8.2-fpm-alpine as php-builder
+
+# Install PHP dependencies
+RUN apk add --no-cache \
+    mysql-client \
+    redis \
+    git \
+    unzip \
+    && docker-php-ext-install pdo_mysql
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Copy and build Laravel application
+WORKDIR /app/backend
+COPY backend/ ./
+RUN composer install --no-dev --optimize-autoloader --no-interaction
+
+# ============================================================================
+# STAGE 3: Production Runtime
+# ============================================================================
+FROM python:3.11-slim as production
+
+# Production environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    ORCHESTRATOR_HOME=/app \
+    LOG_LEVEL=INFO \
+    ENVIRONMENT=production \
+    TZ=UTC
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    mysql-client \
+    redis-tools \
+    nginx \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create application user for security
+RUN groupadd -r genesis && useradd -r -g genesis -s /bin/false genesis
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python dependencies from builder
+COPY --from=builder /root/.local /home/genesis/.local
+ENV PATH=/home/genesis/.local/bin:$PATH
+
+# Copy PHP/Laravel application from php-builder
+COPY --from=php-builder /app/backend ./backend
+
+# Copy application code
+COPY orchestrator/ ./orchestrator/
+COPY config/ ./config/
+COPY tools/ ./tools/
+COPY features/ ./features/
+COPY scripts/ ./scripts/
+COPY monitoring/ ./monitoring/
+
+# Copy configuration files
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+COPY docker/supervisor.conf /etc/supervisor/conf.d/genesis.conf
+COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/www.conf
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/artifacts /app/logs /app/data /app/storage \
+    && chown -R genesis:genesis /app \
+    && chmod -R 755 /app \
+    && chmod +x /app/scripts/*.sh
+
+# Create health check script
+COPY <<EOF /usr/local/bin/health-check
+#!/bin/bash
+set -e
+
+# Check application health
+curl -f http://localhost:8081/health/ready || exit 1
+
+# Check PHP-FPM
+if ! pgrep -f php-fpm > /dev/null; then
+    echo "PHP-FPM not running"
+    exit 1
+fi
+
+# Check Nginx
+if ! pgrep -f nginx > /dev/null; then
+    echo "Nginx not running"
+    exit 1
+fi
+
+# Check orchestrator process
+if ! pgrep -f "python.*orchestrator" > /dev/null; then
+    echo "Orchestrator not running"
+    exit 1
+fi
+
+echo "All services healthy"
+EOF
+
+RUN chmod +x /usr/local/bin/health-check
+
+# Health check configuration
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD /usr/local/bin/health-check
+
+# Expose ports
+EXPOSE 8080 8081 9090 80
+
+# Use supervisor to manage multiple processes
+USER genesis
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/genesis.conf", "-n"]

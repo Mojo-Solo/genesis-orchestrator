@@ -2,6 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\OrchestrationRun;
+use App\Models\RouterMetric;
+use App\Models\StabilityTracking;
+use App\Models\SecurityAuditLog;
+use App\Services\OrchestrationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -119,22 +124,61 @@ class HealthController extends Controller
      */
     public function metrics(): JsonResponse
     {
+        // Get real-time data from models
+        $totalRuns = OrchestrationRun::count();
+        $successfulRuns = OrchestrationRun::successful()->count();
+        $failedRuns = OrchestrationRun::failed()->count();
+        $avgLatency = OrchestrationRun::avg('total_duration_ms') ?? 0;
+        $totalTokens = OrchestrationRun::sum('total_tokens') ?? 0;
+        
+        // Get router metrics
+        $avgTokenSavings = RouterMetric::averageTokenSavings() ?? 0;
+        $avgSelectionTime = RouterMetric::averageSelectionTime() ?? 0;
+        $routerMetrics = RouterMetric::getMetricsByAlgorithm('RCR');
+        
+        // Get stability metrics
+        $systemStability = StabilityTracking::getSystemStability();
+        
+        // Get security metrics
+        $last24Hours = now()->subHours(24);
+        $securityViolations = SecurityAuditLog::violations()
+            ->where('created_at', '>=', $last24Hours)
+            ->count();
+        $authFailures = SecurityAuditLog::authFailures()
+            ->where('created_at', '>=', $last24Hours)
+            ->count();
+        
         $metrics = [
             'orchestrator' => [
-                'total_runs' => Cache::get('genesis.total_runs', 0),
-                'successful_runs' => Cache::get('genesis.successful_runs', 0),
-                'failed_runs' => Cache::get('genesis.failed_runs', 0),
-                'average_latency_ms' => Cache::get('genesis.avg_latency', 0),
-                'total_tokens_used' => Cache::get('genesis.total_tokens', 0)
+                'total_runs' => $totalRuns,
+                'successful_runs' => $successfulRuns,
+                'failed_runs' => $failedRuns,
+                'average_latency_ms' => round($avgLatency, 2),
+                'total_tokens_used' => $totalTokens,
+                'success_rate' => $totalRuns > 0 ? round(($successfulRuns / $totalRuns) * 100, 2) : 0
             ],
             'router' => [
                 'algorithm' => 'RCR',
-                'efficiency_gain' => Cache::get('genesis.router.efficiency', 0),
+                'efficiency_gain' => $routerMetrics['avg_efficiency'] ?? 0,
+                'avg_token_savings' => round($avgTokenSavings, 2),
+                'avg_selection_time_ms' => round($avgSelectionTime, 2),
+                'total_router_runs' => $routerMetrics['total_runs'] ?? 0,
                 'cache_hit_rate' => Cache::get('genesis.router.cache_hits', 0)
             ],
             'stability' => [
-                'current_score' => Cache::get('genesis.stability_score', 0.986),
-                'variance' => Cache::get('genesis.stability_variance', 0.014)
+                'current_score' => $systemStability['stability_score'] ?? 0.986,
+                'variance' => $systemStability['avg_variance'] ?? 0.014,
+                'exact_match_rate' => $systemStability['exact_match_rate'] ?? 0,
+                'sample_size' => $systemStability['sample_size'] ?? 0
+            ],
+            'security' => [
+                'violations_24h' => $securityViolations,
+                'auth_failures_24h' => $authFailures,
+                'suspicious_ips' => SecurityAuditLog::select('ip_address')
+                    ->where('created_at', '>=', $last24Hours)
+                    ->where('severity', SecurityAuditLog::SEVERITY_WARNING)
+                    ->distinct()
+                    ->count()
             ],
             'gates' => [
                 'frontend' => [

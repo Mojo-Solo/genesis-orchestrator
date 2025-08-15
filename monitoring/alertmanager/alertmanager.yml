@@ -1,0 +1,315 @@
+global:
+  # Global configuration
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@genesis.ai'
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+# Template files for notifications
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route configuration for alert routing
+route:
+  group_by: ['alertname', 'component', 'tier']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 12h
+  receiver: 'default'
+  routes:
+    # Critical alerts (Tier 1) - Immediate escalation
+    - match:
+        tier: '1'
+      receiver: 'critical-escalation'
+      group_wait: 0s
+      repeat_interval: 5m
+      routes:
+        # Critical orchestrator issues
+        - match:
+            component: 'orchestrator'
+        receiver: 'orchestrator-critical'
+        - match:
+            component: 'sla'
+        receiver: 'sla-breach'
+        # Critical performance issues
+        - match:
+            component: 'performance'
+        receiver: 'performance-critical'
+        # Critical security issues
+        - match:
+            component: 'security'
+        receiver: 'security-critical'
+
+    # Warning alerts (Tier 2) - Standard escalation
+    - match:
+        tier: '2'
+      receiver: 'warning-escalation'
+      group_wait: 30s
+      repeat_interval: 1h
+      routes:
+        # Performance warnings
+        - match:
+            component: 'performance'
+        receiver: 'performance-warning'
+        # Router issues
+        - match:
+            component: 'router'
+        receiver: 'router-warning'
+        # Database issues
+        - match:
+            component: 'database'
+        receiver: 'database-warning'
+        # Resource warnings
+        - match:
+            component: 'resources'
+        receiver: 'resources-warning'
+
+    # Security alerts - Special handling
+    - match:
+        component: 'security'
+      receiver: 'security-team'
+      group_wait: 0s
+      repeat_interval: 15m
+
+    # Infrastructure alerts
+    - match:
+        component: 'infrastructure'
+      receiver: 'infra-team'
+      group_wait: 1m
+      repeat_interval: 2h
+
+# Inhibition rules to prevent alert flooding
+inhibit_rules:
+  # Inhibit warning alerts when critical ones are firing
+  - source_match:
+      tier: '1'
+    target_match:
+      tier: '2'
+    equal: ['component', 'instance']
+
+  # Inhibit individual component alerts when orchestrator is down
+  - source_match:
+      alertname: 'GenesisOrchestratorDown'
+    target_match_re:
+      alertname: '.*'
+    equal: ['instance']
+
+# Receiver configurations
+receivers:
+  # Default catch-all receiver
+  - name: 'default'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-alerts'
+        title: 'Genesis Alert - {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        color: 'warning'
+
+  # Critical escalation - All channels immediately
+  - name: 'critical-escalation'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-critical'
+        title: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Component:* {{ .Labels.component }}
+          *Runbook:* {{ .Annotations.runbook_url }}
+          {{ end }}
+        color: 'danger'
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_INTEGRATION_KEY}'
+        description: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        severity: 'critical'
+        details:
+          component: '{{ .GroupLabels.component }}'
+          tier: '{{ .GroupLabels.tier }}'
+    email_configs:
+      - to: 'oncall@genesis.ai'
+        subject: 'CRITICAL ALERT: {{ .GroupLabels.alertname }}'
+        body: |
+          Critical alert detected in Genesis Orchestrator:
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          Severity: {{ .Labels.severity }}
+          Time: {{ .StartsAt }}
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end }}
+
+  # Orchestrator critical alerts
+  - name: 'orchestrator-critical'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-orchestrator'
+        title: '🔥 ORCHESTRATOR DOWN: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *URGENT:* Genesis Orchestrator is experiencing critical issues
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Impact:* All orchestration requests will fail
+          *Action Required:* Immediate investigation needed
+          {{ end }}
+        color: 'danger'
+    webhook_configs:
+      - url: '${CUSTOM_WEBHOOK_URL}/orchestrator-down'
+        send_resolved: true
+
+  # SLA breach alerts
+  - name: 'sla-breach'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-sla'
+        title: '📊 SLA BREACH: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *SLA BREACH DETECTED*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Target:* 99.9% uptime
+          *Impact:* Customer SLA violation in progress
+          {{ end }}
+        color: 'danger'
+    email_configs:
+      - to: 'sla-team@genesis.ai,management@genesis.ai'
+        subject: 'SLA BREACH ALERT: {{ .GroupLabels.alertname }}'
+
+  # Performance critical alerts
+  - name: 'performance-critical'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-performance'
+        title: '⚡ PERFORMANCE CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Performance Issue Detected*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Threshold Exceeded:* Critical performance degradation
+          {{ end }}
+        color: 'danger'
+
+  # Security critical alerts
+  - name: 'security-critical'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-security'
+        title: '🛡️ SECURITY CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *SECURITY INCIDENT*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Immediate Action Required*
+          {{ end }}
+        color: 'danger'
+    email_configs:
+      - to: 'security-team@genesis.ai,ciso@genesis.ai'
+        subject: 'SECURITY ALERT: {{ .GroupLabels.alertname }}'
+
+  # Warning escalation
+  - name: 'warning-escalation'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-warnings'
+        title: '⚠️ Warning: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Component:* {{ .Labels.component }}
+          {{ end }}
+        color: 'warning'
+
+  # Performance warning alerts
+  - name: 'performance-warning'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-performance'
+        title: '📈 Performance Warning: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Performance Degradation*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Monitor closely for escalation*
+          {{ end }}
+        color: 'warning'
+
+  # Router warning alerts
+  - name: 'router-warning'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-router'
+        title: '🔄 Router Warning: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Router Performance Issue*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: 'warning'
+
+  # Database warning alerts
+  - name: 'database-warning'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-database'
+        title: '🗄️ Database Warning: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Database Performance Issue*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: 'warning'
+
+  # Resource warning alerts
+  - name: 'resources-warning'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-infrastructure'
+        title: '🖥️ Resource Warning: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Resource Utilization High*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: 'warning'
+
+  # Security team alerts
+  - name: 'security-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-security'
+        title: '🔐 Security Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Security Event*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          {{ end }}
+        color: 'warning'
+
+  # Infrastructure team alerts
+  - name: 'infra-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#genesis-infrastructure'
+        title: '🏗️ Infrastructure Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Infrastructure Issue*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: 'warning'

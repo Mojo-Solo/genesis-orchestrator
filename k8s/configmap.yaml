@@ -1,0 +1,218 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: genesis-config
+  namespace: genesis-orchestrator
+  labels:
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/component: config
+data:
+  # Application configuration
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "production"
+  ENABLE_MONITORING: "true"
+  ENABLE_META_LEARNING: "true"
+  ENABLE_TRACING: "true"
+  
+  # Database configuration
+  DB_CONNECTION: "mysql"
+  DB_PORT: "3306"
+  
+  # Redis configuration
+  REDIS_PORT: "6379"
+  
+  # Temporal configuration
+  TEMPORAL_PORT: "7233"
+  TEMPORAL_NAMESPACE: "genesis-production"
+  TEMPORAL_TASK_QUEUE: "genesis-orchestrator-queue"
+  
+  # Monitoring configuration
+  METRICS_PROMETHEUS_ENABLED: "true"
+  METRICS_PROMETHEUS_PORT: "9090"
+  OTEL_SERVICE_NAME: "genesis-orchestrator"
+  OTEL_METRICS_EXPORTER: "prometheus"
+  OTEL_TRACES_EXPORTER: "jaeger"
+  
+  # Security configuration
+  ENABLE_PII_REDACTION: "true"
+  ENABLE_HMAC_VALIDATION: "true"
+  WEBHOOK_HMAC_ENABLED: "true"
+  WEBHOOK_REQUIRE_HTTPS: "true"
+  
+  # Rate limiting
+  RATE_LIMIT_DEFAULT_RPM: "1000"
+  RATE_LIMIT_DEFAULT_BURST: "100"
+  RATE_LIMIT_ALGORITHM: "sliding_window"
+  
+  # Vault configuration
+  VAULT_VERSION: "v1"
+  VAULT_TIMEOUT: "30"
+  VAULT_VERIFY_SSL: "true"
+  VAULT_NAMESPACE: "genesis"
+  VAULT_AUTH_METHOD: "kubernetes"
+  VAULT_ROTATION_ENABLED: "true"
+  VAULT_RBAC_ENABLED: "true"
+  VAULT_AUDIT_ENABLED: "true"
+  
+  # Worker configuration
+  MAX_CONCURRENT_ACTIVITIES: "20"
+  MAX_CONCURRENT_WORKFLOWS: "10"
+  WORKER_TASK_QUEUE: "genesis-orchestrator-queue"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: genesis-orchestrator
+data:
+  nginx.conf: |
+    upstream genesis_orchestrator {
+        least_conn;
+        server genesis-orchestrator-blue:8080 max_fails=3 fail_timeout=30s;
+        server genesis-orchestrator-green:8080 max_fails=3 fail_timeout=30s backup;
+    }
+    
+    upstream genesis_health {
+        server genesis-orchestrator-blue:8081;
+        server genesis-orchestrator-green:8081 backup;
+    }
+    
+    server {
+        listen 80;
+        listen 443 ssl http2;
+        server_name genesis.production.com;
+        
+        # SSL Configuration
+        ssl_certificate /etc/nginx/ssl/server.crt;
+        ssl_certificate_key /etc/nginx/ssl/server.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512;
+        
+        # Security headers
+        add_header X-Frame-Options DENY;
+        add_header X-Content-Type-Options nosniff;
+        add_header X-XSS-Protection "1; mode=block";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
+        
+        # Rate limiting
+        limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+        limit_req zone=api burst=20 nodelay;
+        
+        # Health check endpoint
+        location /health {
+            proxy_pass http://genesis_health;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            access_log off;
+        }
+        
+        # Main orchestrator endpoint
+        location / {
+            proxy_pass http://genesis_orchestrator;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # Timeouts
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+            
+            # Buffer settings
+            proxy_buffer_size 4k;
+            proxy_buffers 8 4k;
+            proxy_busy_buffers_size 8k;
+        }
+        
+        # Metrics endpoint (internal only)
+        location /metrics {
+            allow 10.0.0.0/8;
+            allow 172.16.0.0/12;
+            allow 192.168.0.0/16;
+            deny all;
+            
+            proxy_pass http://genesis_orchestrator;
+            proxy_set_header Host $host;
+        }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: genesis-orchestrator
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: 'kubernetes'
+        environment: 'production'
+    
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+    
+    alerting:
+      alertmanagers:
+        - kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - genesis-orchestrator
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: alertmanager
+    
+    scrape_configs:
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+        - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: default;kubernetes;https
+      
+      - job_name: 'kubernetes-nodes'
+        kubernetes_sd_configs:
+        - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+      
+      - job_name: 'genesis-orchestrator'
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+              - genesis-orchestrator
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: genesis-orchestrator
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__

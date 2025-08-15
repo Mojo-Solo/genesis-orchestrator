@@ -1,0 +1,242 @@
+# GENESIS Orchestrator - Auto-Scaling Configuration
+# =================================================
+# Comprehensive auto-scaling configuration with business rules and ML-based scaling decisions
+
+prometheus_url: 'http://localhost:9090'
+kubernetes_enabled: true
+docker_compose_enabled: true
+
+# Component-specific scaling rules
+scaling_rules:
+  orchestrator:
+    min_replicas: 2
+    max_replicas: 10
+    target_cpu_utilization: 70
+    target_memory_utilization: 80
+    target_request_rate: 50
+    target_latency_ms: 2000
+    cooldown_minutes: 5
+    scale_up_threshold: 0.5    # Scaling score threshold for scale up
+    scale_down_threshold: -0.3  # Scaling score threshold for scale down
+    aggressive_scaling: false
+    
+  database:
+    min_connections: 10
+    max_connections: 100
+    target_connection_utilization: 70
+    slow_query_threshold: 10   # queries/5min
+    connection_queue_threshold: 5
+    cooldown_minutes: 10
+    
+  cache:
+    min_memory_mb: 512
+    max_memory_mb: 4096
+    target_hit_rate: 85
+    eviction_rate_threshold: 100  # evictions/min
+    memory_fragmentation_threshold: 1.5
+    cooldown_minutes: 3
+    
+  worker:
+    min_replicas: 1
+    max_replicas: 8
+    target_queue_length: 100
+    max_processing_time_ms: 30000
+    failure_rate_threshold: 5  # percentage
+    cooldown_minutes: 5
+
+# Business rules and constraints
+business_rules:
+  peak_hours: [9, 10, 11, 14, 15, 16]  # Hours when demand is typically high
+  maintenance_window: [2, 3, 4]        # Hours when scaling down is preferred
+  weekend_scaling_factor: 0.7          # Reduce scaling sensitivity on weekends
+  holiday_mode: false                   # Conservative scaling during holidays
+  aggressive_scaling: false             # Enable aggressive scaling for high-growth periods
+  cost_optimization_mode: true          # Bias toward cost efficiency
+  max_hourly_cost_increase: 100        # Maximum additional cost per hour ($)
+  sla_priority_mode: true              # Prioritize SLA compliance over cost
+
+# Metric weights for scaling decisions
+metrics:
+  cpu_weight: 0.3
+  memory_weight: 0.25
+  request_rate_weight: 0.2
+  latency_weight: 0.15
+  error_rate_weight: 0.1
+  queue_depth_weight: 0.1
+  stability_weight: 0.05
+
+# ML-based prediction settings
+machine_learning:
+  enabled: true
+  prediction_horizon_minutes: 30
+  trend_analysis_window_minutes: 60
+  seasonal_adjustment: true
+  confidence_threshold: 0.7
+  model_retrain_interval_hours: 24
+  features:
+    - 'cpu_utilization'
+    - 'memory_utilization' 
+    - 'request_rate'
+    - 'error_rate'
+    - 'hour_of_day'
+    - 'day_of_week'
+    - 'is_weekend'
+    - 'is_holiday'
+
+# Alert integration
+alerting:
+  enabled: true
+  slack_webhook: "${SLACK_WEBHOOK_URL}"
+  pagerduty_integration_key: "${PAGERDUTY_INTEGRATION_KEY}"
+  notification_channels:
+    scale_up: ["slack"]
+    scale_down: ["slack"]
+    scaling_failure: ["slack", "pagerduty"]
+    cost_threshold_exceeded: ["slack", "email"]
+
+# Safety mechanisms
+safety:
+  enable_circuit_breaker: true
+  max_scaling_events_per_hour: 10
+  emergency_stop_conditions:
+    - 'error_rate > 25'
+    - 'cpu_utilization > 95'
+    - 'memory_utilization > 95'
+    - 'response_time_ms > 10000'
+  rollback_on_failure: true
+  rollback_timeout_minutes: 5
+  dry_run_mode: false  # Set to true for testing without actual scaling
+
+# Cost management
+cost_management:
+  enable_cost_tracking: true
+  cost_per_replica_per_hour:
+    orchestrator: 2.50
+    worker: 1.50
+    database: 5.00
+  cost_per_mb_per_hour:
+    cache: 0.001
+  budget_limits:
+    daily_budget: 500
+    monthly_budget: 12000
+  cost_alerts:
+    daily_threshold: 400
+    monthly_threshold: 10000
+
+# Performance thresholds
+performance_thresholds:
+  response_time:
+    warning_ms: 1000
+    critical_ms: 3000
+  throughput:
+    min_requests_per_second: 5
+    target_requests_per_second: 50
+  error_rates:
+    warning_percentage: 2
+    critical_percentage: 5
+  resource_utilization:
+    cpu_warning: 70
+    cpu_critical: 85
+    memory_warning: 75
+    memory_critical: 90
+
+# Kubernetes-specific settings
+kubernetes:
+  namespace: "genesis-orchestrator"
+  deployment_names:
+    orchestrator: "genesis-orchestrator"
+    worker: "genesis-worker"
+  hpa_enabled: true  # Use Horizontal Pod Autoscaler when available
+  vpa_enabled: false # Vertical Pod Autoscaler (experimental)
+  cluster_autoscaler_compatible: true
+
+# Docker Compose specific settings  
+docker_compose:
+  compose_file: "docker-compose.yml"
+  service_names:
+    orchestrator: "orchestrator"
+    worker: "worker"
+    database: "database"
+    cache: "redis"
+
+# Monitoring and logging
+monitoring:
+  enable_detailed_logging: true
+  log_level: "INFO"
+  metrics_retention_days: 30
+  enable_prometheus_metrics: true
+  metric_export_interval_seconds: 30
+  health_check_interval_seconds: 60
+
+# Advanced scaling algorithms
+algorithms:
+  primary: "predictive_ml"  # Options: simple, predictive_ml, hybrid
+  fallback: "simple"
+  
+  simple:
+    scale_up_multiplier: 1.2
+    scale_down_multiplier: 0.8
+    
+  predictive_ml:
+    prediction_accuracy_threshold: 0.8
+    trend_weight: 0.4
+    current_load_weight: 0.6
+    seasonal_weight: 0.2
+    
+  hybrid:
+    ml_confidence_threshold: 0.7
+    use_ml_when_confident: true
+    fallback_to_simple: true
+
+# Integration settings
+integrations:
+  prometheus:
+    url: "http://localhost:9090"
+    timeout_seconds: 10
+  grafana:
+    url: "http://localhost:3000"
+    api_key: "${GRAFANA_API_KEY}"
+  alertmanager:
+    url: "http://localhost:9093"
+    timeout_seconds: 5
+
+# Testing and validation
+testing:
+  enable_chaos_testing: false
+  chaos_probability: 0.01
+  load_testing_integration: false
+  synthetic_monitoring: true
+  canary_deployment_support: true
+
+# Regional and multi-zone settings
+deployment:
+  multi_zone: false
+  preferred_zones: ["us-east-1a", "us-east-1b"]
+  cross_region_scaling: false
+  disaster_recovery_scaling: false
+
+# Custom scaling policies
+custom_policies:
+  - name: "peak_traffic_policy"
+    conditions:
+      - "hour_of_day in [9,10,11,14,15,16]"
+      - "request_rate > 40"
+    actions:
+      - "set_min_replicas: 4"
+      - "reduce_scale_down_threshold: 0.1"
+      
+  - name: "maintenance_mode_policy"  
+    conditions:
+      - "hour_of_day in [2,3,4]"
+      - "day_of_week in [6,7]"  # Weekend
+    actions:
+      - "enable_aggressive_scale_down: true"
+      - "increase_cooldown_minutes: 10"
+      
+  - name: "error_rate_emergency_policy"
+    conditions:
+      - "error_rate > 15"
+    actions:
+      - "emergency_scale_up: 2"
+      - "trigger_alert: critical"
+      - "disable_scale_down: 300"  # seconds

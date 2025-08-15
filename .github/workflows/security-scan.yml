@@ -1,0 +1,488 @@
+name: Security Scanning & Vulnerability Assessment
+
+on:
+  push:
+    branches: [main, develop, 'release/**', 'hotfix/**']
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - quick
+        - container-only
+        - code-only
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/genesis-orchestrator
+
+jobs:
+  # ============================================================================
+  # STATIC CODE ANALYSIS
+  # ============================================================================
+  static-analysis:
+    name: Static Code Security Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install security analysis tools
+        run: |
+          pip install bandit[toml] safety semgrep
+          pip install -r requirements.txt
+
+      - name: Python Security Scan (Bandit)
+        run: |
+          bandit -r . -f json -o bandit-report.json -ll -x tests/,venv/,.venv/ || true
+          bandit -r . -f txt -ll -x tests/,venv/,.venv/
+
+      - name: Python Dependency Vulnerability Scan (Safety)
+        run: |
+          safety check --json --output safety-report.json || true
+          safety check
+
+      - name: Semgrep Security Analysis
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+            p/command-injection
+            p/sql-injection
+            p/xss
+          generateSarif: "1"
+
+      - name: Upload Semgrep results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+            semgrep.sarif
+
+  # ============================================================================
+  # SECRET DETECTION
+  # ============================================================================
+  secret-detection:
+    name: Secret & Credential Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: GitLeaks Secret Detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: TruffleHog Secret Scanning
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Detect-secrets scan
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --all-files --baseline .secrets.baseline
+          detect-secrets audit .secrets.baseline
+
+  # ============================================================================
+  # CONTAINER SECURITY
+  # ============================================================================
+  container-security:
+    name: Container Security Scanning
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type != 'code-only' || github.event_name != 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build container for scanning
+        run: |
+          docker build -t genesis-security-scan:latest -f Dockerfile.production .
+
+      - name: Trivy Container Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'genesis-security-scan:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Grype Container Vulnerability Scan
+        uses: anchore/scan-action@v3
+        with:
+          image: "genesis-security-scan:latest"
+          fail-build: false
+          severity-cutoff: medium
+          output-format: sarif
+          output-file: grype-results.sarif
+
+      - name: Upload Grype scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'grype-results.sarif'
+
+      - name: Docker Scout Security Analysis
+        uses: docker/scout-action@v1
+        if: github.event_name == 'pull_request'
+        with:
+          command: cves
+          image: genesis-security-scan:latest
+          sarif-file: scout-results.sarif
+          summary: true
+
+  # ============================================================================
+  # INFRASTRUCTURE SECURITY
+  # ============================================================================
+  infrastructure-security:
+    name: Infrastructure Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkov Infrastructure Security Scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          quiet: true
+          soft_fail: true
+          framework: dockerfile,kubernetes,terraform,secrets
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'checkov-results.sarif'
+
+      - name: Kubernetes Security Scan (Kubesec)
+        run: |
+          curl -sSX POST --data-binary @k8s/deployment.yaml https://v2.kubesec.io/scan > kubesec-results.json
+          cat kubesec-results.json | jq '.'
+
+      - name: OPA Kubernetes Policy Validation
+        run: |
+          # Install OPA
+          curl -L -o opa https://openpolicyagent.org/downloads/v0.57.0/opa_linux_amd64_static
+          chmod +x opa
+          
+          # Validate Kubernetes manifests against security policies
+          ./opa test k8s/ --format=json > opa-results.json || true
+          cat opa-results.json
+
+  # ============================================================================
+  # PHP/LARAVEL SECURITY
+  # ============================================================================
+  php-security:
+    name: PHP/Laravel Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo, mysql, mbstring, xml
+          tools: composer
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          composer install --no-dev --optimize-autoloader
+
+      - name: Psalm Security Analysis
+        run: |
+          cd backend
+          composer require --dev psalm/psalm
+          ./vendor/bin/psalm --config=psalm.xml --output-format=github --taint-analysis
+
+      - name: PHPStan Security Analysis
+        run: |
+          cd backend
+          composer require --dev phpstan/phpstan
+          ./vendor/bin/phpstan analyse --level=8 --error-format=github
+
+      - name: Laravel Security Check
+        run: |
+          cd backend
+          composer require --dev enlightn/security-checker
+          ./vendor/bin/security-checker security:check
+
+  # ============================================================================
+  # DEPENDENCY SCANNING
+  # ============================================================================
+  dependency-security:
+    name: Dependency Security Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Python Dependency Scan
+        run: |
+          pip install pip-audit
+          pip-audit --format=json --output=pip-audit-results.json || true
+          pip-audit
+
+      - name: PHP Dependency Scan
+        run: |
+          cd backend
+          composer install --no-dev
+          composer audit --format=json > composer-audit-results.json || true
+          composer audit
+
+      - name: Node.js Dependency Scan (if applicable)
+        run: |
+          if [ -f "package.json" ]; then
+            npm audit --audit-level=moderate --json > npm-audit-results.json || true
+            npm audit
+          fi
+
+  # ============================================================================
+  # RUNTIME SECURITY ANALYSIS
+  # ============================================================================
+  runtime-security:
+    name: Runtime Security Analysis
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type == 'full' || github.event_name != 'workflow_dispatch'
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: genesis_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up test environment
+        run: |
+          cp env.example .env
+          echo "DB_CONNECTION=mysql" >> .env
+          echo "DB_HOST=127.0.0.1" >> .env
+          echo "DB_PORT=3306" >> .env
+          echo "DB_DATABASE=genesis_test" >> .env
+          echo "DB_USERNAME=root" >> .env
+          echo "DB_PASSWORD=root" >> .env
+          echo "REDIS_HOST=127.0.0.1" >> .env
+          echo "REDIS_PORT=6379" >> .env
+
+      - name: Build and start application
+        run: |
+          docker build -t genesis-security-test -f Dockerfile.production .
+          docker run -d --name genesis-test --network host genesis-security-test
+          sleep 30
+
+      - name: ZAP Security Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: 'http://localhost:8081'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'
+
+      - name: ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.8.0
+        if: github.event.inputs.scan_type == 'full'
+        with:
+          target: 'http://localhost:8081'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop genesis-test || true
+          docker rm genesis-test || true
+
+  # ============================================================================
+  # SECURITY COMPLIANCE CHECKS
+  # ============================================================================
+  compliance-check:
+    name: Security Compliance Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: CIS Kubernetes Benchmark
+        run: |
+          # Download kube-bench
+          curl -L https://github.com/aquasecurity/kube-bench/releases/download/v0.6.15/kube-bench_0.6.15_linux_amd64.tar.gz | tar xz
+          
+          # Run CIS benchmark against Kubernetes manifests
+          ./kube-bench run --targets=master,node,etcd,policies --json > cis-benchmark-results.json || true
+          cat cis-benchmark-results.json
+
+      - name: NIST Cybersecurity Framework Check
+        run: |
+          # Custom NIST compliance validation
+          python scripts/nist_compliance_check.py --output=nist-compliance-results.json
+
+      - name: SOC 2 Type II Compliance Check
+        run: |
+          # SOC 2 compliance validation
+          python scripts/soc2_compliance_check.py --output=soc2-compliance-results.json
+
+  # ============================================================================
+  # SECURITY REPORT GENERATION
+  # ============================================================================
+  security-report:
+    name: Security Report Generation
+    runs-on: ubuntu-latest
+    needs: [static-analysis, secret-detection, container-security, infrastructure-security, php-security, dependency-security, runtime-security, compliance-check]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all security artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: security-artifacts
+
+      - name: Generate comprehensive security report
+        run: |
+          python scripts/generate_security_report.py \
+            --input-dir=security-artifacts \
+            --output=security-summary-report.json \
+            --format=json,html,pdf
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-security-report
+          path: |
+            security-summary-report.json
+            security-summary-report.html
+            security-summary-report.pdf
+
+      - name: Check security gate
+        run: |
+          python scripts/security_gate_check.py \
+            --report=security-summary-report.json \
+            --threshold-critical=0 \
+            --threshold-high=5 \
+            --threshold-medium=20
+
+      - name: Create security issue if failures found
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Security vulnerabilities detected in CI/CD pipeline',
+              body: 'Security scanning has detected vulnerabilities that exceed the defined thresholds. Please review the security report and address the issues.',
+              labels: ['security', 'critical', 'ci-cd']
+            })
+
+  # ============================================================================
+  # NOTIFICATION
+  # ============================================================================
+  security-notification:
+    name: Security Scan Notification
+    runs-on: ubuntu-latest
+    needs: [security-report]
+    if: always()
+    steps:
+      - name: Slack notification for security results
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          channel: '#security-alerts'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          text: |
+            🔒 GENESIS Orchestrator Security Scan Complete
+            Status: ${{ job.status }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            
+            Please review security artifacts for any critical findings.
+
+      - name: Email notification for critical vulnerabilities
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 CRITICAL: Security vulnerabilities detected in GENESIS Orchestrator"
+          to: ${{ secrets.SECURITY_CONTACT }}
+          from: "GENESIS Security <security@genesis.com>"
+          body: |
+            Critical security vulnerabilities have been detected in the GENESIS Orchestrator.
+            
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Workflow: ${{ github.workflow }}
+            Run ID: ${{ github.run_id }}
+            
+            Please review the security report and take immediate action to address the vulnerabilities.
+            
+            Security Dashboard: https://github.com/${{ github.repository }}/security

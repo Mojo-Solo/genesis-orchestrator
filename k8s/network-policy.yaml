@@ -1,0 +1,292 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: genesis-orchestrator-network-policy
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: genesis-orchestrator
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from load balancer
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 9090
+  # Allow ingress from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Allow internal communication within namespace
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow egress to database
+  - to:
+    - podSelector:
+        matchLabels:
+          app: mysql-primary
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: mysql-replica
+    ports:
+    - protocol: TCP
+      port: 3306
+  # Allow egress to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis-primary
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis-replica
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow egress to Temporal
+  - to:
+    - podSelector:
+        matchLabels:
+          app: temporal
+    ports:
+    - protocol: TCP
+      port: 7233
+    - protocol: TCP
+      port: 8233
+  # Allow egress to external APIs (OpenAI, Anthropic, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: temporal-worker-network-policy
+  namespace: genesis-orchestrator
+  labels:
+    app: temporal-worker
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: temporal-worker
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow monitoring ingress
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9091
+  # Allow internal communication
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 9091
+  egress:
+  # Allow egress to Temporal
+  - to:
+    - podSelector:
+        matchLabels:
+          app: temporal
+    ports:
+    - protocol: TCP
+      port: 7233
+  # Allow egress to Redis for caching
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis-primary
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow egress to orchestrator for callbacks
+  - to:
+    - podSelector:
+        matchLabels:
+          app: genesis-orchestrator
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow external API access
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-network-policy
+  namespace: genesis-orchestrator
+  labels:
+    app: mysql
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql-primary
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from orchestrator
+  - from:
+    - podSelector:
+        matchLabels:
+          app: genesis-orchestrator
+    ports:
+    - protocol: TCP
+      port: 3306
+  # Allow ingress from workers
+  - from:
+    - podSelector:
+        matchLabels:
+          app: temporal-worker
+    ports:
+    - protocol: TCP
+      port: 3306
+  # Allow ingress from replica for replication
+  - from:
+    - podSelector:
+        matchLabels:
+          app: mysql-replica
+    ports:
+    - protocol: TCP
+      port: 3306
+  egress:
+  # Allow egress to replica for replication
+  - to:
+    - podSelector:
+        matchLabels:
+          app: mysql-replica
+    ports:
+    - protocol: TCP
+      port: 3306
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-network-policy
+  namespace: genesis-orchestrator
+  labels:
+    app: redis
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: redis-primary
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from orchestrator
+  - from:
+    - podSelector:
+        matchLabels:
+          app: genesis-orchestrator
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow ingress from workers
+  - from:
+    - podSelector:
+        matchLabels:
+          app: temporal-worker
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow ingress from replica
+  - from:
+    - podSelector:
+        matchLabels:
+          app: redis-replica
+    ports:
+    - protocol: TCP
+      port: 6379
+  egress:
+  # Allow egress to replica for replication
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis-replica
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53

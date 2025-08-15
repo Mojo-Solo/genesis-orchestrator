@@ -124,7 +124,7 @@ Feature: System Stability and Reproducibility (98.6% Target)
 
   @stability @tie-breaking @determinism
   Scenario: Deterministic tie-breaking in router
-    Given I have documents with identical importance scores
+    Given I have documents with identical importance scores for stability testing
     And tie-breaker is configured to use "id"
     When routing selects from tied documents
     Then selection should be consistent across runs

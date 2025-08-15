@@ -1,0 +1,257 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: genesis-orchestrator
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/component: service
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: mcp-server
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: genesis-orchestrator
+    version: blue  # Initially pointing to blue deployment
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: genesis-orchestrator-blue
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    version: blue
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/component: service
+spec:
+  type: ClusterIP
+  ports:
+  - name: mcp-server
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: genesis-orchestrator
+    version: blue
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: genesis-orchestrator-green
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    version: green
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/component: service
+spec:
+  type: ClusterIP
+  ports:
+  - name: mcp-server
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: genesis-orchestrator
+    version: green
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-worker
+  namespace: genesis-orchestrator
+  labels:
+    app: temporal-worker
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: 9091
+    targetPort: 9091
+    protocol: TCP
+  selector:
+    app: temporal-worker
+
+---
+# External LoadBalancer for production access
+apiVersion: v1
+kind: Service
+metadata:
+  name: genesis-orchestrator-external
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/component: loadbalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "${AWS_SSL_CERT_ARN}"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "60"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8080
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  selector:
+    app: genesis-orchestrator
+  sessionAffinity: None
+  loadBalancerSourceRanges:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+
+---
+# Database Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-primary
+  namespace: genesis-orchestrator
+  labels:
+    app: mysql
+    role: primary
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3306
+    targetPort: 3306
+    name: mysql
+  selector:
+    app: mysql
+    role: primary
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-replica
+  namespace: genesis-orchestrator
+  labels:
+    app: mysql
+    role: replica
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3306
+    targetPort: 3306
+    name: mysql
+  selector:
+    app: mysql
+    role: replica
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-primary
+  namespace: genesis-orchestrator
+  labels:
+    app: redis
+    role: primary
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  selector:
+    app: redis
+    role: primary
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  namespace: genesis-orchestrator
+  labels:
+    app: temporal
+spec:
+  type: ClusterIP
+  ports:
+  - port: 7233
+    targetPort: 7233
+    name: frontend
+  - port: 8233
+    targetPort: 8233
+    name: web
+  selector:
+    app: temporal
+
+---
+# Headless service for StatefulSet components
+apiVersion: v1
+kind: Service
+metadata:
+  name: genesis-orchestrator-headless
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    app.kubernetes.io/name: genesis-orchestrator
+    app.kubernetes.io/component: headless
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: mcp-server
+    port: 8080
+    targetPort: 8080
+  - name: health
+    port: 8081
+    targetPort: 8081
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+  selector:
+    app: genesis-orchestrator

@@ -1,0 +1,294 @@
+groups:
+  - name: genesis_business_sla_alerts
+    rules:
+      # === SLA COMPLIANCE ALERTS ===
+      # 99.9% uptime SLA monitoring with time-window analysis
+      
+      - alert: SLAUptimeBreach
+        expr: |
+          (
+            1 - (
+              sum(up{job="genesis-orchestrator"} == 1) / 
+              sum(up{job="genesis-orchestrator"})
+            )
+          ) * 100 > 0.1
+        for: 30s
+        labels:
+          severity: critical
+          component: sla
+          tier: 1
+          business_impact: "high"
+          sla_type: "availability"
+        annotations:
+          summary: "SLA uptime breach detected"
+          description: "Genesis Orchestrator availability has fallen below 99.9% SLA threshold. Current availability: {{ $value }}%"
+          impact: "Customer-facing operations may be affected"
+          action_required: "Immediate investigation and remediation required"
+          escalation_path: "Page on-call engineer, notify management if not resolved in 15 minutes"
+          runbook_url: "https://docs.genesis.ai/runbooks/sla-breach"
+
+      - alert: SLALatencyBreach
+        expr: |
+          (
+            histogram_quantile(0.95, 
+              rate(genesis_orchestrator_request_duration_seconds_bucket[5m])
+            ) * 1000
+          ) > 2000
+        for: 2m
+        labels:
+          severity: warning
+          component: sla
+          tier: 2
+          business_impact: "medium"
+          sla_type: "performance"
+        annotations:
+          summary: "SLA response time breach detected"
+          description: "95th percentile response time {{ $value }}ms exceeds 2000ms SLA"
+          impact: "User experience degradation, potential customer complaints"
+          action_required: "Performance investigation and optimization"
+          runbook_url: "https://docs.genesis.ai/runbooks/performance-degradation"
+
+      - alert: SLAThroughputBreach
+        expr: |
+          rate(genesis_orchestrator_successful_runs[5m]) < 5
+        for: 3m
+        labels:
+          severity: warning
+          component: sla
+          tier: 2
+          business_impact: "medium"
+          sla_type: "throughput"
+        annotations:
+          summary: "SLA throughput below minimum threshold"
+          description: "Successful request rate {{ $value }}/sec is below minimum SLA of 5 req/sec"
+          impact: "Reduced system capacity, potential service limitations"
+          action_required: "Capacity planning review and scaling assessment"
+
+      # === BUSINESS LOGIC ALERTS ===
+      
+      - alert: BusinessCriticalFailureRate
+        expr: |
+          (
+            rate(genesis_orchestrator_failed_runs[10m]) / 
+            rate(genesis_orchestrator_total_runs[10m])
+          ) * 100 > 2
+        for: 5m
+        labels:
+          severity: critical
+          component: business_logic
+          tier: 1
+          business_impact: "high"
+        annotations:
+          summary: "Business-critical failure rate exceeded"
+          description: "Orchestrator failure rate {{ $value }}% exceeds 2% business threshold over 10 minutes"
+          impact: "Direct impact on customer workflows and business operations"
+          action_required: "Immediate root cause analysis and remediation"
+          business_context: "High failure rates directly impact customer satisfaction and revenue"
+          
+      - alert: TokenBudgetBusinessImpact
+        expr: |
+          (
+            genesis_orchestrator_total_tokens_used / 
+            genesis_router_total_token_budget
+          ) * 100 > 80
+        for: 1m
+        labels:
+          severity: warning
+          component: budget
+          tier: 2
+          business_impact: "medium"
+          cost_impact: "high"
+        annotations:
+          summary: "Token budget approaching business impact threshold"
+          description: "Token usage at {{ $value }}% of budget - approaching cost impact zone"
+          impact: "Potential budget overrun and increased operational costs"
+          action_required: "Review token efficiency and consider budget adjustment"
+          financial_impact: "Potential unexpected costs if usage exceeds planned budget"
+
+      - alert: RouterEfficiencyBusinessImpact
+        expr: |
+          genesis_router_efficiency_gain < 10
+        for: 5m
+        labels:
+          severity: warning
+          component: router
+          tier: 2
+          business_impact: "medium"
+          efficiency_type: "cost_optimization"
+        annotations:
+          summary: "Router efficiency below business optimization threshold"
+          description: "Router efficiency gain {{ $value }}% below 10% business target"
+          impact: "Suboptimal cost efficiency, increased operational expenses"
+          action_required: "Router algorithm tuning and efficiency optimization"
+          business_context: "Lower efficiency directly impacts operational cost structure"
+
+      # === CUSTOMER EXPERIENCE ALERTS ===
+      
+      - alert: CustomerExperienceDegradation
+        expr: |
+          (
+            sum(rate(genesis_orchestrator_request_duration_seconds_sum[5m])) /
+            sum(rate(genesis_orchestrator_request_duration_seconds_count[5m]))
+          ) * 1000 > 3000
+        for: 2m
+        labels:
+          severity: warning
+          component: customer_experience
+          tier: 2
+          business_impact: "high"
+        annotations:
+          summary: "Customer experience degradation detected"
+          description: "Average response time {{ $value }}ms exceeds customer satisfaction threshold"
+          impact: "Poor user experience, potential customer churn risk"
+          action_required: "User journey analysis and performance optimization"
+          customer_impact: "Users experiencing slower response times"
+
+      - alert: StabilityImpactingCustomers
+        expr: |
+          genesis_stability_current_score < 0.92
+        for: 3m
+        labels:
+          severity: warning
+          component: stability
+          tier: 2
+          business_impact: "medium"
+        annotations:
+          summary: "System stability affecting customer experience"
+          description: "Stability score {{ $value }} below customer satisfaction threshold of 92%"
+          impact: "Inconsistent results may affect customer trust"
+          action_required: "Stability analysis and determinism improvement"
+          customer_impact: "Customers may receive inconsistent or unexpected responses"
+
+      # === REVENUE IMPACT ALERTS ===
+      
+      - alert: RevenueImpactingOutage
+        expr: |
+          up{job="genesis-orchestrator"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: revenue
+          tier: 1
+          business_impact: "critical"
+          revenue_impact: "direct"
+        annotations:
+          summary: "Revenue-impacting system outage"
+          description: "Genesis Orchestrator is down - direct revenue impact"
+          impact: "Complete service unavailability, direct revenue loss"
+          action_required: "All-hands incident response, immediate recovery"
+          revenue_impact: "Estimated revenue loss: ${{ $value }}k per hour based on historical data"
+          escalation: "Notify C-level executives immediately"
+
+      # === OPERATIONAL EFFICIENCY ALERTS ===
+      
+      - alert: OperationalEfficiencyDrop
+        expr: |
+          (
+            genesis_router_avg_selection_time_ms > 500
+          ) and (
+            genesis_router_efficiency_gain < 15
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: operational_efficiency
+          tier: 2
+          business_impact: "medium"
+        annotations:
+          summary: "Operational efficiency below business targets"
+          description: "Router selection time {{ $value }}ms and efficiency below operational targets"
+          impact: "Increased operational costs, suboptimal resource utilization"
+          action_required: "Operational efficiency review and optimization"
+          
+      # === SECURITY BUSINESS IMPACT ALERTS ===
+      
+      - alert: SecurityBreachBusinessRisk
+        expr: |
+          increase(genesis_security_violations_24h[1h]) > 50
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          tier: 1
+          business_impact: "critical"
+          compliance_risk: "high"
+        annotations:
+          summary: "Security breach with potential business impact"
+          description: "{{ $value }} security violations in the last hour indicate potential breach"
+          impact: "Data breach risk, compliance violations, reputation damage"
+          action_required: "Immediate security incident response protocol"
+          compliance_impact: "Potential GDPR, SOX, or other regulatory compliance violations"
+          business_risk: "Reputation damage, legal liability, financial penalties"
+
+      # === PREDICTIVE BUSINESS ALERTS ===
+      
+      - alert: BusinessMetricTrendingDown
+        expr: |
+          deriv(genesis_orchestrator_successful_runs[30m]) < -0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: business_trend
+          tier: 2
+          business_impact: "medium"
+          alert_type: "predictive"
+        annotations:
+          summary: "Business metrics showing negative trend"
+          description: "Successful request rate trending downward over 30 minutes"
+          impact: "Potential business impact if trend continues"
+          action_required: "Trend analysis and proactive intervention"
+          prediction: "Current trend suggests potential business impact within 2 hours"
+
+      # === CAPACITY PLANNING ALERTS ===
+      
+      - alert: CapacityPlanningRequired
+        expr: |
+          predict_linear(genesis_orchestrator_total_runs[6h], 24*3600) > 
+          genesis_orchestrator_total_runs * 1.5
+        for: 15m
+        labels:
+          severity: warning
+          component: capacity
+          tier: 2
+          business_impact: "medium"
+          planning_type: "growth"
+        annotations:
+          summary: "Capacity planning intervention required"
+          description: "Projected 24h load {{ $value }} exceeds current capacity by 50%"
+          impact: "Potential capacity constraints, service degradation risk"
+          action_required: "Capacity planning review and scaling preparation"
+          recommendation: "Consider scaling resources within next 12 hours"
+
+  - name: genesis_business_health_monitoring
+    rules:
+      # Business health composite scores
+      - record: genesis:business_health_score
+        expr: |
+          (
+            (genesis_stability_current_score * 0.3) +
+            ((genesis_orchestrator_successful_runs / genesis_orchestrator_total_runs) * 0.4) +
+            (min(genesis_router_efficiency_gain / 20, 1) * 0.2) +
+            (min((2000 - genesis_orchestrator_average_latency_ms) / 2000, 1) * 0.1)
+          )
+        labels:
+          metric_type: "business_kpi"
+          
+      - record: genesis:customer_satisfaction_proxy
+        expr: |
+          (
+            (min((3000 - genesis_orchestrator_average_latency_ms) / 3000, 1) * 0.4) +
+            (genesis_stability_current_score * 0.3) +
+            ((genesis_orchestrator_successful_runs / genesis_orchestrator_total_runs) * 0.3)
+          )
+        labels:
+          metric_type: "customer_experience"
+          
+      - record: genesis:operational_efficiency_score
+        expr: |
+          (
+            (genesis_router_efficiency_gain / 25) * 0.5 +
+            (min(500 / genesis_router_avg_selection_time_ms, 1) * 0.3) +
+            (min(genesis_router_cache_hit_rate / 0.8, 1) * 0.2)
+          )
+        labels:
+          metric_type: "operational_kpi"

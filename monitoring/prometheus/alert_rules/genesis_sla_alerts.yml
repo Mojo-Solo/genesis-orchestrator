@@ -1,0 +1,218 @@
+groups:
+  - name: genesis_sla_monitoring
+    rules:
+      # SLA Availability Tracking (99.9% target)
+      - alert: SLAAvailabilityBreach
+        expr: |
+          (
+            (1 - (avg_over_time(up{job="genesis-orchestrator"}[1h]))) * 100
+          ) > 0.1
+        for: 1m
+        labels:
+          severity: critical
+          component: sla
+          tier: 1
+          sla_type: availability
+        annotations:
+          summary: "SLA availability breach - below 99.9%"
+          description: "System availability is {{ $value }}% over the last hour, breaching 99.9% SLA"
+          runbook_url: "https://docs.genesis.ai/runbooks/sla-breach"
+          impact: "Customer SLA violation in progress"
+
+      # SLA Performance Tracking (response time)
+      - alert: SLAResponseTimeBreach
+        expr: |
+          (
+            histogram_quantile(0.95, 
+              rate(genesis_orchestrator_request_duration_seconds_bucket[5m])
+            ) * 1000
+          ) > 2000
+        for: 2m
+        labels:
+          severity: critical
+          component: sla
+          tier: 1
+          sla_type: performance
+        annotations:
+          summary: "SLA response time breach - 95th percentile above 2s"
+          description: "95th percentile response time is {{ $value }}ms, exceeding 2s SLA"
+          runbook_url: "https://docs.genesis.ai/runbooks/performance-sla"
+
+      # SLA Error Rate Tracking
+      - alert: SLAErrorRateBreach
+        expr: |
+          (
+            sum(rate(genesis_orchestrator_failed_runs[5m])) /
+            sum(rate(genesis_orchestrator_total_runs[5m]))
+          ) * 100 > 1.0
+        for: 3m
+        labels:
+          severity: critical
+          component: sla
+          tier: 1
+          sla_type: reliability
+        annotations:
+          summary: "SLA error rate breach - above 1%"
+          description: "Error rate is {{ $value }}%, exceeding 1% SLA threshold"
+          runbook_url: "https://docs.genesis.ai/runbooks/reliability-sla"
+
+      # Monthly SLA Budget Tracking
+      - alert: SLABudgetExhaustion
+        expr: |
+          (
+            (1 - avg_over_time(up{job="genesis-orchestrator"}[30d])) * 100
+          ) > 0.08  # 80% of monthly error budget (0.1%)
+        for: 5m
+        labels:
+          severity: warning
+          component: sla
+          tier: 2
+          sla_type: budget
+        annotations:
+          summary: "SLA error budget 80% exhausted"
+          description: "Monthly error budget is 80% consumed - {{ $value }}% downtime this month"
+          runbook_url: "https://docs.genesis.ai/runbooks/error-budget"
+
+  - name: genesis_anomaly_detection
+    rules:
+      # Request Rate Anomaly Detection
+      - alert: RequestRateAnomaly
+        expr: |
+          (
+            rate(genesis_orchestrator_total_runs[5m]) > 
+            (
+              avg_over_time(rate(genesis_orchestrator_total_runs[5m])[1h:5m]) + 
+              3 * stddev_over_time(rate(genesis_orchestrator_total_runs[5m])[1h:5m])
+            )
+          ) or (
+            rate(genesis_orchestrator_total_runs[5m]) < 
+            (
+              avg_over_time(rate(genesis_orchestrator_total_runs[5m])[1h:5m]) - 
+              3 * stddev_over_time(rate(genesis_orchestrator_total_runs[5m])[1h:5m])
+            )
+          )
+        for: 2m
+        labels:
+          severity: warning
+          component: anomaly
+          tier: 2
+          anomaly_type: request_rate
+        annotations:
+          summary: "Anomalous request rate detected"
+          description: "Request rate {{ $value }}/sec is 3+ standard deviations from normal"
+          runbook_url: "https://docs.genesis.ai/runbooks/anomaly-detection"
+
+      # Response Time Anomaly Detection
+      - alert: ResponseTimeAnomaly
+        expr: |
+          (
+            genesis_orchestrator_average_latency_ms > 
+            (
+              avg_over_time(genesis_orchestrator_average_latency_ms[1h]) + 
+              2 * stddev_over_time(genesis_orchestrator_average_latency_ms[1h])
+            )
+          )
+        for: 3m
+        labels:
+          severity: warning
+          component: anomaly
+          tier: 2
+          anomaly_type: latency
+        annotations:
+          summary: "Anomalous response time detected"
+          description: "Average latency {{ $value }}ms is 2+ standard deviations above normal"
+          runbook_url: "https://docs.genesis.ai/runbooks/latency-anomaly"
+
+      # Memory Usage Anomaly
+      - alert: MemoryUsageAnomaly
+        expr: |
+          (
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 >
+            (
+              avg_over_time(
+                (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100[2h]
+              ) + 
+              2 * stddev_over_time(
+                (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100[2h]
+              )
+            )
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: anomaly
+          tier: 2
+          anomaly_type: memory
+        annotations:
+          summary: "Anomalous memory usage pattern detected"
+          description: "Memory usage {{ $value }}% is significantly above normal pattern"
+          runbook_url: "https://docs.genesis.ai/runbooks/memory-anomaly"
+
+      # Token Usage Anomaly
+      - alert: TokenUsageAnomaly
+        expr: |
+          (
+            rate(genesis_orchestrator_total_tokens[10m]) >
+            (
+              avg_over_time(rate(genesis_orchestrator_total_tokens[10m])[2h:10m]) +
+              2.5 * stddev_over_time(rate(genesis_orchestrator_total_tokens[10m])[2h:10m])
+            )
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: anomaly
+          tier: 2
+          anomaly_type: token_usage
+        annotations:
+          summary: "Anomalous token usage detected"
+          description: "Token usage rate {{ $value }}/min is significantly above normal"
+          runbook_url: "https://docs.genesis.ai/runbooks/token-anomaly"
+
+  - name: genesis_predictive_alerts
+    rules:
+      # Predictive Disk Space Alert
+      - alert: DiskSpaceExhaustionPredicted
+        expr: |
+          predict_linear(node_filesystem_avail_bytes[1h], 4 * 3600) < 0
+        for: 10m
+        labels:
+          severity: warning
+          component: prediction
+          tier: 2
+          prediction_type: disk_space
+        annotations:
+          summary: "Disk space exhaustion predicted within 4 hours"
+          description: "Current disk usage trend predicts exhaustion in ~4 hours"
+          runbook_url: "https://docs.genesis.ai/runbooks/disk-space-prediction"
+
+      # Predictive Memory Exhaustion
+      - alert: MemoryExhaustionPredicted
+        expr: |
+          predict_linear(node_memory_MemAvailable_bytes[30m], 2 * 3600) < 
+          (node_memory_MemTotal_bytes * 0.05)  # Predict when available memory < 5%
+        for: 5m
+        labels:
+          severity: warning
+          component: prediction
+          tier: 2
+          prediction_type: memory
+        annotations:
+          summary: "Memory exhaustion predicted within 2 hours"
+          description: "Current memory usage trend predicts critical levels in ~2 hours"
+          runbook_url: "https://docs.genesis.ai/runbooks/memory-prediction"
+
+      # Predictive Token Budget Exhaustion
+      - alert: TokenBudgetExhaustionPredicted
+        expr: |
+          predict_linear(genesis_router_total_token_budget[15m], 1 * 3600) > 49000
+        for: 5m
+        labels:
+          severity: warning
+          component: prediction
+          tier: 2
+          prediction_type: token_budget
+        annotations:
+          summary: "Token budget exhaustion predicted within 1 hour"
+          description: "Current token usage trend predicts budget exhaustion soon"
+          runbook_url: "https://docs.genesis.ai/runbooks/token-budget-prediction"

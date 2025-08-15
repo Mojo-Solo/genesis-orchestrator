@@ -1,0 +1,48 @@
+[Unit]
+Description=GENESIS Orchestrator Backup System
+After=network.target mysql.service redis.service
+Wants=mysql.service redis.service
+PartOf=genesis-orchestrator.target
+
+[Service]
+Type=forking
+User=genesis
+Group=genesis
+WorkingDirectory=/opt/genesis
+ExecStart=/opt/genesis/scripts/backup/backup_scheduler.sh start
+ExecStop=/bin/kill -TERM $MAINPID
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/var/run/genesis_backup_scheduler.pid
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+# Environment variables
+Environment=BACKUP_ROOT_DIR=/var/backups/genesis
+Environment=BACKUP_S3_BUCKET=genesis-disaster-recovery
+Environment=BACKUP_S3_REGION=us-west-2
+Environment=BACKUP_CROSS_REGIONS=us-east-1,eu-west-1
+Environment=BACKUP_RETENTION_DAYS=90
+Environment=MYSQL_HOST=mysql-primary
+Environment=REDIS_HOST=redis-primary
+Environment=ENCRYPTION_KEY_ID=alias/genesis-backup-key
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/genesis /var/log/genesis /var/lib/genesis
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=4G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=genesis-orchestrator.target

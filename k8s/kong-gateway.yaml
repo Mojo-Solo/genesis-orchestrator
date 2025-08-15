@@ -1,0 +1,282 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-config
+  namespace: genesis-orchestrator
+data:
+  kong.conf: |
+    # Kong Configuration for GENESIS Orchestrator
+    # Advanced API Gateway with Rate Limiting and Security
+    
+    # Database Configuration
+    database = postgres
+    pg_host = postgres-service
+    pg_port = 5432
+    pg_database = kong
+    pg_user = kong
+    pg_password = $(KONG_PG_PASSWORD)
+    
+    # Cluster Configuration
+    cluster_listen = 0.0.0.0:8005
+    cluster_listen_rpc = 0.0.0.0:8006
+    
+    # Admin API
+    admin_listen = 0.0.0.0:8001
+    admin_access_log = /dev/stdout
+    admin_error_log = /dev/stderr
+    
+    # Proxy Configuration
+    proxy_listen = 0.0.0.0:8000, 0.0.0.0:8443 ssl
+    proxy_access_log = /dev/stdout
+    proxy_error_log = /dev/stderr
+    
+    # SSL Configuration
+    ssl_cert = /etc/kong/ssl/tls.crt
+    ssl_cert_key = /etc/kong/ssl/tls.key
+    
+    # Headers
+    real_ip_header = X-Forwarded-For
+    real_ip_recursive = on
+    trusted_ips = 0.0.0.0/0
+    
+    # Lua Configuration
+    lua_package_path = /opt/kong/?.lua;;
+    lua_socket_pool_size = 256
+    
+    # Rate Limiting
+    nginx_worker_processes = auto
+    nginx_worker_connections = 16384
+    
+    # Security
+    nginx_http_client_max_body_size = 100m
+    nginx_http_client_body_buffer_size = 8k
+    
+    # Logging
+    log_level = info
+    error_default_type = application/json
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kong-secrets
+  namespace: genesis-orchestrator
+type: Opaque
+data:
+  # Base64 encoded passwords and secrets
+  KONG_PG_PASSWORD: a29uZ19wYXNzd29yZA==  # kong_password
+  KONG_ADMIN_TOKEN: YWRtaW5fdG9rZW5fMTIzNDU=  # admin_token_12345
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong-gateway
+  namespace: genesis-orchestrator
+  labels:
+    app: kong-gateway
+    component: api-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kong-gateway
+  template:
+    metadata:
+      labels:
+        app: kong-gateway
+        component: api-gateway
+    spec:
+      initContainers:
+      - name: kong-migrations
+        image: kong:3.4
+        command: ['kong', 'migrations', 'bootstrap']
+        env:
+        - name: KONG_DATABASE
+          value: postgres
+        - name: KONG_PG_HOST
+          value: postgres-service
+        - name: KONG_PG_USER
+          value: kong
+        - name: KONG_PG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kong-secrets
+              key: KONG_PG_PASSWORD
+        - name: KONG_PG_DATABASE
+          value: kong
+      containers:
+      - name: kong
+        image: kong:3.4
+        ports:
+        - containerPort: 8000
+          name: proxy
+        - containerPort: 8443
+          name: proxy-ssl
+        - containerPort: 8001
+          name: admin
+        - containerPort: 8444
+          name: admin-ssl
+        env:
+        - name: KONG_DATABASE
+          value: postgres
+        - name: KONG_PG_HOST
+          value: postgres-service
+        - name: KONG_PG_USER
+          value: kong
+        - name: KONG_PG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kong-secrets
+              key: KONG_PG_PASSWORD
+        - name: KONG_PG_DATABASE
+          value: kong
+        - name: KONG_PROXY_ACCESS_LOG
+          value: /dev/stdout
+        - name: KONG_ADMIN_ACCESS_LOG
+          value: /dev/stdout
+        - name: KONG_PROXY_ERROR_LOG
+          value: /dev/stderr
+        - name: KONG_ADMIN_ERROR_LOG
+          value: /dev/stderr
+        - name: KONG_ADMIN_LISTEN
+          value: 0.0.0.0:8001
+        - name: KONG_PLUGINS
+          value: bundled,rate-limiting-advanced,prometheus,request-transformer,response-transformer,cors,key-auth,jwt,oauth2,acl,ip-restriction,bot-detection,proxy-cache
+        volumeMounts:
+        - name: kong-config
+          mountPath: /etc/kong/kong.conf
+          subPath: kong.conf
+        - name: ssl-certs
+          mountPath: /etc/kong/ssl
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: 8001
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: kong-config
+        configMap:
+          name: kong-config
+      - name: ssl-certs
+        secret:
+          secretName: kong-ssl-certs
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-gateway-service
+  namespace: genesis-orchestrator
+spec:
+  type: LoadBalancer
+  ports:
+  - name: proxy
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  - name: proxy-ssl
+    port: 443
+    targetPort: 8443
+    protocol: TCP
+  selector:
+    app: kong-gateway
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-admin-service
+  namespace: genesis-orchestrator
+spec:
+  type: ClusterIP
+  ports:
+  - name: admin
+    port: 8001
+    targetPort: 8001
+    protocol: TCP
+  - name: admin-ssl
+    port: 8444
+    targetPort: 8444
+    protocol: TCP
+  selector:
+    app: kong-gateway
+
+---
+# Kong Database (PostgreSQL)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: genesis-orchestrator
+spec:
+  serviceName: postgres-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:13
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: kong
+        - name: POSTGRES_USER
+          value: kong
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kong-secrets
+              key: KONG_PG_PASSWORD
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: genesis-orchestrator
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: postgres

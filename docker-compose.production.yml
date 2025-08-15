@@ -1,0 +1,499 @@
+version: '3.8'
+
+# GENESIS Orchestrator Production Docker Compose
+# High-availability, production-ready configuration
+
+services:
+  # ============================================================================
+  # DATABASE CLUSTER (MySQL with Read Replicas)
+  # ============================================================================
+  mysql-primary:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_REPLICATION_USER: replicator
+      MYSQL_REPLICATION_PASSWORD: ${MYSQL_REPLICATION_PASSWORD}
+    command: |
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=row
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --binlog-do-db=${DB_DATABASE}
+      --max-connections=1000
+      --innodb-buffer-pool-size=2G
+      --innodb-log-file-size=256M
+      --slow-query-log=1
+      --long-query-time=2
+    volumes:
+      - mysql-primary-data:/var/lib/mysql
+      - ./docker/mysql/primary.cnf:/etc/mysql/conf.d/primary.cnf
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+    ports:
+      - "3306:3306"
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  mysql-replica:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_MASTER_HOST: mysql-primary
+      MYSQL_REPLICATION_USER: replicator
+      MYSQL_REPLICATION_PASSWORD: ${MYSQL_REPLICATION_PASSWORD}
+    command: |
+      --server-id=2
+      --relay-log=mysql-relay-bin
+      --log-slave-updates=1
+      --read-only=1
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --max-connections=1000
+      --innodb-buffer-pool-size=1G
+    volumes:
+      - mysql-replica-data:/var/lib/mysql
+      - ./docker/mysql/replica.cnf:/etc/mysql/conf.d/replica.cnf
+    depends_on:
+      - mysql-primary
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # ============================================================================
+  # REDIS CLUSTER
+  # ============================================================================
+  redis-primary:
+    image: redis:7-alpine
+    restart: always
+    command: |
+      redis-server 
+      --appendonly yes 
+      --appendfsync everysec
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    volumes:
+      - redis-primary-data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  redis-replica:
+    image: redis:7-alpine
+    restart: always
+    command: |
+      redis-server 
+      --slaveof redis-primary 6379
+      --slave-read-only yes
+      --appendonly yes
+    volumes:
+      - redis-replica-data:/data
+    depends_on:
+      - redis-primary
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+
+  # ============================================================================
+  # TEMPORAL CLUSTER
+  # ============================================================================
+  temporal:
+    image: temporalio/auto-setup:latest
+    restart: always
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=${TEMPORAL_DB_USER}
+      - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD}
+      - POSTGRES_SEEDS=temporal-postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
+      - TEMPORAL_TLS_SERVER_CERT_PATH=/tls/server.crt
+      - TEMPORAL_TLS_SERVER_KEY_PATH=/tls/server.key
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - ./docker/temporal/config:/etc/temporal/config
+      - ./docker/temporal/tls:/tls
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  temporal-postgres:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: ${TEMPORAL_DB_USER}
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - genesis-network
+
+  # ============================================================================
+  # GENESIS ORCHESTRATOR CLUSTER
+  # ============================================================================
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    restart: always
+    environment:
+      # Database
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql-primary
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_READ_HOST=mysql-replica
+      
+      # Redis
+      - REDIS_HOST=redis-primary
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      
+      # Temporal
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=genesis-production
+      - TEMPORAL_TLS_ENABLED=true
+      
+      # Application
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - ENABLE_MONITORING=true
+      - ENABLE_META_LEARNING=true
+      - ENABLE_TRACING=true
+      
+      # Security
+      - HMAC_SECRET_KEY=${HMAC_SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      
+      # Vault
+      - VAULT_URL=${VAULT_URL}
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - VAULT_NAMESPACE=genesis
+      
+      # Monitoring
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:14268/api/traces
+      - OTEL_SERVICE_NAME=genesis-orchestrator
+      - METRICS_PROMETHEUS_ENABLED=true
+    ports:
+      - "8080:8080"  # MCP Server
+      - "8081:8081"  # Health checks
+      - "9090:9090"  # Metrics
+    volumes:
+      - ./config:/app/config:ro
+      - orchestrator-artifacts:/app/artifacts
+      - orchestrator-logs:/app/logs
+      - orchestrator-storage:/app/storage
+    depends_on:
+      - mysql-primary
+      - redis-primary
+      - temporal
+    networks:
+      - genesis-network
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ============================================================================
+  # TEMPORAL WORKERS
+  # ============================================================================
+  temporal-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: always
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=genesis-production
+      - WORKER_TASK_QUEUE=genesis-orchestrator-queue
+      - REDIS_HOST=redis-primary
+      - MAX_CONCURRENT_ACTIVITIES=20
+      - MAX_CONCURRENT_WORKFLOWS=10
+    volumes:
+      - ./config:/app/config:ro
+      - orchestrator-artifacts:/app/artifacts
+    depends_on:
+      - temporal
+      - redis-primary
+    networks:
+      - genesis-network
+    deploy:
+      replicas: 5
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # ============================================================================
+  # LOAD BALANCER
+  # ============================================================================
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - orchestrator
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ============================================================================
+  # MONITORING STACK
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert_rules:/etc/prometheus/alert_rules:ro
+      - prometheus-data:/prometheus
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    restart: always
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      - genesis-network
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_INSTALL_PLUGINS=redis-datasource,grafana-clock-panel,grafana-simple-json-datasource
+      - GF_SERVER_ROOT_URL=https://monitoring.genesis.com
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - genesis-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: always
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - SPAN_STORAGE_TYPE=elasticsearch
+      - ES_SERVER_URLS=http://elasticsearch:9200
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    depends_on:
+      - elasticsearch
+    networks:
+      - genesis-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    restart: always
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - genesis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # ============================================================================
+  # LOG AGGREGATION
+  # ============================================================================
+  fluentd:
+    build:
+      context: ./docker/fluentd
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - ./docker/fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      - orchestrator-logs:/app/logs:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - genesis-network
+
+# ============================================================================
+# PERSISTENT VOLUMES
+# ============================================================================
+volumes:
+  mysql-primary-data:
+    driver: local
+  mysql-replica-data:
+    driver: local
+  redis-primary-data:
+    driver: local
+  redis-replica-data:
+    driver: local
+  temporal-postgres-data:
+    driver: local
+  orchestrator-artifacts:
+    driver: local
+  orchestrator-logs:
+    driver: local
+  orchestrator-storage:
+    driver: local
+  prometheus-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+  grafana-data:
+    driver: local
+  elasticsearch-data:
+    driver: local
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  genesis-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

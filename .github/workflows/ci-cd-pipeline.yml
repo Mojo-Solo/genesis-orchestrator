@@ -1,0 +1,553 @@
+name: GENESIS Orchestrator CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop, 'release/**']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - development
+        - staging
+        - production
+      deployment_strategy:
+        description: 'Deployment strategy'
+        required: true
+        default: 'blue-green'
+        type: choice
+        options:
+        - blue-green
+        - canary
+        - rolling
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/genesis-orchestrator
+  PYTHON_VERSION: '3.11'
+  PHP_VERSION: '8.2'
+  NODE_VERSION: '18'
+
+jobs:
+  # ============================================================================
+  # SECURITY AND COMPLIANCE SCANNING
+  # ============================================================================
+  security-scan:
+    name: Security & Compliance Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Python Security Scan (Bandit)
+        run: |
+          pip install bandit[toml]
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . -f txt
+
+      - name: Secret Detection (GitLeaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: PHP Security Scan (Psalm)
+        run: |
+          composer install --no-dev --optimize-autoloader
+          composer require --dev psalm/psalm
+          ./vendor/bin/psalm --config=psalm.xml --output-format=github || true
+
+  # ============================================================================
+  # UNIT AND INTEGRATION TESTING
+  # ============================================================================
+  test-python:
+    name: Python Tests (BDD & Unit)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: genesis_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Set up test environment
+        run: |
+          cp env.example .env
+          echo "DB_CONNECTION=mysql" >> .env
+          echo "DB_HOST=127.0.0.1" >> .env
+          echo "DB_PORT=3306" >> .env
+          echo "DB_DATABASE=genesis_test" >> .env
+          echo "DB_USERNAME=root" >> .env
+          echo "DB_PASSWORD=root" >> .env
+          echo "REDIS_HOST=127.0.0.1" >> .env
+          echo "REDIS_PORT=6379" >> .env
+          echo "TEMPORAL_HOST=localhost:7233" >> .env
+
+      - name: Run BDD Tests (Behave)
+        run: |
+          python -m behave features/ --format=json --outfile=behave-results.json --format=pretty
+          python -m behave features/ --format=junit --outfile=behave-junit.xml
+
+      - name: Run Unit Tests (PyTest)
+        run: |
+          python -m pytest tests/ --cov=orchestrator --cov-report=xml --cov-report=html --junitxml=pytest-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: python-test-results
+          path: |
+            behave-results.json
+            behave-junit.xml
+            pytest-results.xml
+            htmlcov/
+            coverage.xml
+
+  test-php:
+    name: PHP/Laravel Tests
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: genesis_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ env.PHP_VERSION }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: pdo, mysql, redis, mbstring, xml, ctype, json, tokenizer
+          coverage: xdebug
+
+      - name: Install Composer dependencies
+        run: |
+          cd backend
+          composer install --prefer-dist --no-progress --no-suggest
+
+      - name: Set up Laravel environment
+        run: |
+          cd backend
+          cp .env.example .env
+          php artisan key:generate
+          echo "DB_CONNECTION=mysql" >> .env
+          echo "DB_HOST=127.0.0.1" >> .env
+          echo "DB_PORT=3306" >> .env
+          echo "DB_DATABASE=genesis_test" >> .env
+          echo "DB_USERNAME=root" >> .env
+          echo "DB_PASSWORD=root" >> .env
+
+      - name: Run database migrations
+        run: |
+          cd backend
+          php artisan migrate --force
+
+      - name: Run PHP tests
+        run: |
+          cd backend
+          ./vendor/bin/phpunit --configuration phpunit.xml --coverage-clover coverage.xml
+
+      - name: Upload PHP test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: php-test-results
+          path: |
+            backend/coverage.xml
+            backend/storage/logs/
+
+  # ============================================================================
+  # CODE QUALITY AND LINTING
+  # ============================================================================
+  code-quality:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python linting tools
+        run: |
+          pip install black isort flake8 mypy
+          pip install -r requirements.txt
+
+      - name: Python Code Formatting (Black)
+        run: black --check --diff .
+
+      - name: Python Import Sorting (isort)
+        run: isort --check-only --diff .
+
+      - name: Python Linting (Flake8)
+        run: flake8 . --count --statistics
+
+      - name: Python Type Checking (MyPy)
+        run: mypy orchestrator/ tools/ scripts/ --ignore-missing-imports
+
+      - name: Set up PHP ${{ env.PHP_VERSION }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          tools: composer
+
+      - name: PHP Code Standards (PHP CS Fixer)
+        run: |
+          cd backend
+          composer install
+          ./vendor/bin/php-cs-fixer fix --dry-run --diff --verbose
+
+  # ============================================================================
+  # PERFORMANCE AND LOAD TESTING
+  # ============================================================================
+  performance-test:
+    name: Performance & Load Testing
+    runs-on: ubuntu-latest
+    needs: [test-python, test-php]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up performance testing environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apache2-utils
+
+      - name: Build test image
+        run: |
+          docker build -t genesis-test -f orchestrator/Dockerfile .
+
+      - name: Start test environment
+        run: |
+          docker-compose -f orchestrator/docker-compose.yml up -d
+          sleep 30
+
+      - name: Wait for services to be ready
+        run: |
+          timeout 60 bash -c 'until curl -f http://localhost:8081/health; do sleep 2; done'
+
+      - name: Run load tests
+        run: |
+          # Basic load test
+          ab -n 1000 -c 10 http://localhost:8081/health/live
+          
+          # Orchestration endpoint load test
+          ab -n 500 -c 5 -p test-payload.json -T application/json http://localhost:8080/orchestrate
+
+      - name: Performance regression test
+        run: |
+          python scripts/performance_benchmark.py --baseline=performance-baseline.json --output=performance-results.json
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          docker-compose -f orchestrator/docker-compose.yml down -v
+
+  # ============================================================================
+  # BUILD AND PACKAGE
+  # ============================================================================
+  build:
+    name: Build & Package
+    runs-on: ubuntu-latest
+    needs: [security-scan, test-python, test-php, code-quality]
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: orchestrator/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v3
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+  # ============================================================================
+  # DEPLOYMENT TO DEVELOPMENT
+  # ============================================================================
+  deploy-development:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [build, performance-test]
+    if: github.ref == 'refs/heads/develop'
+    environment: development
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Development Environment
+        run: |
+          echo "Deploying to development environment..."
+          
+          # Use deployment script
+          ./scripts/deploy.sh \
+            --environment development \
+            --strategy rolling \
+            --tag ${{ github.sha }} \
+            --timeout 300
+
+      - name: Run smoke tests
+        run: |
+          python scripts/health_check.py --environment=development
+          python -m behave features/ --tags=@smoke
+
+  # ============================================================================
+  # DEPLOYMENT TO STAGING
+  # ============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, performance-test]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Blue-Green Deployment to Staging
+        run: |
+          echo "Starting blue-green deployment to staging..."
+          
+          # Use deployment script with blue-green strategy
+          ./scripts/deploy.sh \
+            --environment staging \
+            --strategy blue-green \
+            --tag ${{ github.sha }} \
+            --timeout 600
+
+      - name: Integration tests
+        run: |
+          python -m behave features/ --tags=@integration --format=pretty
+
+      - name: Performance validation
+        run: |
+          python scripts/health_check.py --environment=staging --comprehensive
+
+  # ============================================================================
+  # DEPLOYMENT TO PRODUCTION
+  # ============================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main' && github.event.inputs.environment == 'production'
+    environment: 
+      name: production
+      url: https://genesis.production.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Production Pre-deployment Checks
+        run: |
+          # Verify staging environment health
+          python scripts/health_check.py --environment=staging --comprehensive
+          
+          # Check production readiness
+          echo "Running production readiness checks..."
+          python -m behave features/ --tags=@production-ready
+
+      - name: Production Deployment
+        run: |
+          echo "Starting production deployment with strategy: ${{ github.event.inputs.deployment_strategy || 'blue-green' }}"
+          
+          # Use deployment script with specified strategy
+          ./scripts/deploy.sh \
+            --environment production \
+            --strategy ${{ github.event.inputs.deployment_strategy || 'blue-green' }} \
+            --tag ${{ github.sha }} \
+            --timeout 900 \
+            ${{ github.event.inputs.deployment_strategy == 'canary' && format('--canary-percentage {0}', '10') || '' }}
+
+      - name: Post-deployment Validation
+        run: |
+          # Run critical path tests
+          python -m behave features/ --tags=@critical --format=pretty
+          
+          # Comprehensive health validation
+          python scripts/health_check.py --environment=production --comprehensive
+          
+          # Validate SLA metrics
+          echo "Validating SLA metrics..."
+          python scripts/monitoring/sla_monitor.py --environment=production --validate
+
+  # ============================================================================
+  # ROLLBACK CAPABILITY
+  # ============================================================================
+  rollback:
+    name: Emergency Rollback
+    runs-on: ubuntu-latest
+    if: failure() && (needs.deploy-staging.result == 'failure' || needs.deploy-production.result == 'failure')
+    environment: 
+      name: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Emergency Rollback
+        run: |
+          echo "Executing emergency rollback for environment: ${{ github.event.inputs.environment || 'staging' }}"
+          
+          # Use rollback script
+          ./scripts/rollback.sh \
+            --environment ${{ github.event.inputs.environment || 'staging' }} \
+            --type emergency \
+            --timeout 300 \
+            ${{ github.event.inputs.environment == 'production' && '--restore-database' || '' }}
+
+      - name: Verify Rollback
+        run: |
+          python scripts/health_check.py --environment=${{ github.event.inputs.environment || 'staging' }}
+          python -m behave features/ --tags=@smoke
+
+  # ============================================================================
+  # NOTIFICATION AND REPORTING
+  # ============================================================================
+  notify:
+    name: Notification & Reporting
+    runs-on: ubuntu-latest
+    needs: [deploy-production, deploy-staging, deploy-development]
+    if: always()
+    steps:
+      - name: Generate Deployment Report
+        run: |
+          echo "# GENESIS Orchestrator Deployment Report" > deployment-report.md
+          echo "## Summary" >> deployment-report.md
+          echo "- Build Status: ${{ needs.build.result }}" >> deployment-report.md
+          echo "- Security Scan: ${{ needs.security-scan.result }}" >> deployment-report.md
+          echo "- Tests: ${{ needs.test-python.result }} / ${{ needs.test-php.result }}" >> deployment-report.md
+          echo "- Performance: ${{ needs.performance-test.result }}" >> deployment-report.md
+          echo "- Deployment: ${{ needs.deploy-production.result || needs.deploy-staging.result || needs.deploy-development.result }}" >> deployment-report.md
+
+      - name: Slack Notification
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          channel: '#genesis-deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          text: |
+            GENESIS Orchestrator Deployment Complete
+            Environment: ${{ github.event.inputs.environment || 'auto' }}
+            Status: ${{ job.status }}
+            Commit: ${{ github.sha }}
+
+      - name: Email Notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "GENESIS Orchestrator Deployment Failed"
+          to: ${{ secrets.EMERGENCY_CONTACT }}
+          from: "GENESIS CI/CD <noreply@genesis.com>"
+          body: |
+            GENESIS Orchestrator deployment has failed.
+            
+            Environment: ${{ github.event.inputs.environment || 'auto' }}
+            Workflow: ${{ github.workflow }}
+            Run ID: ${{ github.run_id }}
+            Commit: ${{ github.sha }}
+            
+            Please check the GitHub Actions logs for details.

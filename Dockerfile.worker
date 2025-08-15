@@ -1,0 +1,198 @@
+# GENESIS Orchestrator Worker Dockerfile
+# Multi-stage build for optimized production deployment
+
+# ============================================================================
+# STAGE 1: Build Stage
+# ============================================================================
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    git \
+    curl \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /build
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt requirements-production.txt ./
+RUN pip install --no-cache-dir --user -r requirements-production.txt
+
+# Install additional worker-specific dependencies
+RUN pip install --no-cache-dir --user \
+    temporalio[opentelemetry] \
+    prometheus_client \
+    structlog \
+    tenacity \
+    asyncio-mqtt
+
+# ============================================================================
+# STAGE 2: Production Runtime for Workers
+# ============================================================================
+FROM python:3.11-slim as production
+
+# Production environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    WORKER_HOME=/app \
+    LOG_LEVEL=INFO \
+    ENVIRONMENT=production \
+    TZ=UTC \
+    WORKER_TYPE=temporal \
+    MAX_CONCURRENT_ACTIVITIES=20 \
+    MAX_CONCURRENT_WORKFLOWS=10 \
+    WORKER_TASK_QUEUE=genesis-orchestrator-queue \
+    HEARTBEAT_TIMEOUT=30 \
+    ACTIVITY_TIMEOUT=300
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    redis-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create application user for security
+RUN groupadd -r genesis && useradd -r -g genesis -s /bin/false -d /app genesis
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python dependencies from builder
+COPY --from=builder /root/.local /home/genesis/.local
+ENV PATH=/home/genesis/.local/bin:$PATH
+
+# Copy application code
+COPY tools/temporal/ ./temporal/
+COPY orchestrator/ ./orchestrator/
+COPY config/ ./config/
+COPY scripts/ ./scripts/
+COPY monitoring/ ./monitoring/
+
+# Create worker startup script
+RUN cat > /app/start-worker.sh << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+echo "Starting GENESIS Orchestrator Worker..."
+echo "Worker Type: ${WORKER_TYPE}"
+echo "Task Queue: ${WORKER_TASK_QUEUE}"
+echo "Max Concurrent Activities: ${MAX_CONCURRENT_ACTIVITIES}"
+echo "Max Concurrent Workflows: ${MAX_CONCURRENT_WORKFLOWS}"
+
+# Wait for Temporal to be ready
+echo "Waiting for Temporal to be ready..."
+while ! curl -f "${TEMPORAL_HOST}/health" >/dev/null 2>&1; do
+    echo "Temporal not ready, waiting..."
+    sleep 5
+done
+echo "Temporal is ready!"
+
+# Wait for Redis to be ready
+echo "Waiting for Redis to be ready..."
+while ! redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" ping >/dev/null 2>&1; do
+    echo "Redis not ready, waiting..."
+    sleep 2
+done
+echo "Redis is ready!"
+
+# Start the appropriate worker based on type
+case "${WORKER_TYPE}" in
+    "temporal")
+        echo "Starting Temporal worker..."
+        exec python temporal/worker.py
+        ;;
+    "general")
+        echo "Starting general worker..."
+        exec python orchestrator/workers/general_worker.py
+        ;;
+    "processing")
+        echo "Starting processing worker..."
+        exec python orchestrator/workers/processing_worker.py
+        ;;
+    *)
+        echo "Unknown worker type: ${WORKER_TYPE}"
+        exit 1
+        ;;
+esac
+EOF
+
+RUN chmod +x /app/start-worker.sh
+
+# Create health check script for workers
+RUN cat > /usr/local/bin/worker-health-check << 'EOF'
+#!/bin/bash
+set -e
+
+# Check if worker process is running
+if ! pgrep -f "python.*worker" > /dev/null; then
+    echo "Worker process not running"
+    exit 1
+fi
+
+# Check Temporal connection
+if ! curl -f "${TEMPORAL_HOST}/health" >/dev/null 2>&1; then
+    echo "Cannot connect to Temporal"
+    exit 1
+fi
+
+# Check Redis connection
+if ! redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" ping >/dev/null 2>&1; then
+    echo "Cannot connect to Redis"
+    exit 1
+fi
+
+# Check worker metrics endpoint
+if ! curl -f "http://localhost:9091/metrics" >/dev/null 2>&1; then
+    echo "Worker metrics endpoint not responding"
+    exit 1
+fi
+
+echo "Worker is healthy"
+EOF
+
+RUN chmod +x /usr/local/bin/worker-health-check
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/artifacts /app/logs /app/data /app/storage /app/tmp \
+    && chown -R genesis:genesis /app \
+    && chmod -R 755 /app
+
+# Health check configuration
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD /usr/local/bin/worker-health-check
+
+# Expose metrics port
+EXPOSE 9091
+
+# Use non-root user
+USER genesis
+
+# Default command
+CMD ["/app/start-worker.sh"]
+
+# ============================================================================
+# LABELS AND METADATA
+# ============================================================================
+LABEL org.opencontainers.image.title="GENESIS Orchestrator Worker"
+LABEL org.opencontainers.image.description="Production-ready worker container for GENESIS Orchestrator"
+LABEL org.opencontainers.image.vendor="GENESIS"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.source="https://github.com/genesis/orchestrator"
+LABEL org.opencontainers.image.documentation="https://docs.genesis.com/orchestrator"
+
+# Build arguments for CI/CD
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+LABEL org.opencontainers.image.created=$BUILD_DATE
+LABEL org.opencontainers.image.revision=$VCS_REF
+LABEL org.opencontainers.image.version=$VERSION

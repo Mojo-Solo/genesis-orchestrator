@@ -1,0 +1,549 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Genesis Security & Anomaly Detection",
+    "tags": ["genesis", "security", "anomalies", "ai"],
+    "style": "dark",
+    "timezone": "browser",
+    "editable": true,
+    "hideControls": false,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h"],
+      "time_options": ["15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "severity",
+          "type": "custom",
+          "options": [
+            {"text": "All", "value": ".*", "selected": true},
+            {"text": "Critical", "value": "critical", "selected": false},
+            {"text": "High", "value": "high", "selected": false},
+            {"text": "Medium", "value": "medium", "selected": false},
+            {"text": "Low", "value": "low", "selected": false}
+          ],
+          "multi": true,
+          "includeAll": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        },
+        {
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertstate=\"firing\",component=\"security\"}",
+          "iconColor": "red",
+          "name": "Security Alerts",
+          "titleFormat": "{{ alertname }}",
+          "textFormat": "{{ description }}"
+        }
+      ]
+    },
+    "refresh": "30s",
+    "schemaVersion": 30,
+    "version": 1,
+    "links": [
+      {
+        "title": "Genesis Overview",
+        "url": "/d/genesis-orchestrator-overview",
+        "type": "dashboards"
+      },
+      {
+        "title": "Infrastructure",
+        "url": "/d/genesis-infrastructure",
+        "type": "dashboards"
+      }
+    ],
+    "panels": [
+      {
+        "id": 1,
+        "title": "Security Status Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "genesis_security_violations_24h",
+            "legendFormat": "Security Violations",
+            "refId": "A"
+          },
+          {
+            "expr": "genesis_security_auth_failures_24h",
+            "legendFormat": "Auth Failures",
+            "refId": "B"
+          },
+          {
+            "expr": "genesis_security_suspicious_ips",
+            "legendFormat": "Suspicious IPs",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 10
+                },
+                {
+                  "color": "red",
+                  "value": 50
+                }
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 8,
+          "x": 0,
+          "y": 0
+        },
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "horizontal",
+          "textMode": "name",
+          "colorMode": "background"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Real-time Anomalies Detected",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "genesis_anomaly_count_by_metric",
+            "legendFormat": "{{ metric_name }} - {{ severity }}",
+            "refId": "A",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 1
+                },
+                {
+                  "color": "red",
+                  "value": 5
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 16,
+          "x": 8,
+          "y": 0
+        },
+        "options": {
+          "showHeader": true
+        }
+      },
+      {
+        "id": 3,
+        "title": "Security Violation Trends",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "increase(genesis_security_violations_24h[1h])",
+            "legendFormat": "Security Violations/hour",
+            "refId": "A"
+          },
+          {
+            "expr": "increase(genesis_security_auth_failures_24h[1h])",
+            "legendFormat": "Auth Failures/hour",
+            "refId": "B"
+          },
+          {
+            "expr": "increase(genesis_security_rate_limit_hits[1h])",
+            "legendFormat": "Rate Limit Hits/hour",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 0,
+          "y": 4
+        },
+        "yAxes": [
+          {
+            "label": "Count/hour",
+            "min": 0
+          }
+        ],
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "avg": true,
+          "max": true
+        },
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [20],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["A", "1h", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "last"
+              },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "2m",
+          "frequency": "30s",
+          "handler": 1,
+          "name": "Security Violation Spike",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 4,
+        "title": "ML Anomaly Confidence Scores",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "genesis_anomaly_confidence_score",
+            "legendFormat": "{{ metric_name }}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "continuous-GrYlRd"
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 12
+        },
+        "options": {
+          "calculate": false,
+          "calculation": {},
+          "cellGap": 2,
+          "cellValues": {},
+          "color": {
+            "exponent": 0.5,
+            "fill": "dark-orange",
+            "mode": "spectrum",
+            "reverse": false,
+            "scale": "exponential",
+            "scheme": "Oranges",
+            "steps": 64
+          },
+          "yAxis": {
+            "decimals": 2,
+            "max": 1,
+            "min": 0,
+            "unit": "percentunit"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Anomaly Detection Performance",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "genesis_anomaly_detection_accuracy",
+            "legendFormat": "Detection Accuracy",
+            "refId": "A"
+          },
+          {
+            "expr": "genesis_anomaly_false_positive_rate",
+            "legendFormat": "False Positive Rate",
+            "refId": "B"
+          },
+          {
+            "expr": "genesis_anomaly_detection_latency_ms",
+            "legendFormat": "Detection Latency (ms)",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.8
+                },
+                {
+                  "color": "green",
+                  "value": 0.95
+                }
+              ]
+            },
+            "unit": "percentunit"
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 12
+        },
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "horizontal",
+          "textMode": "auto",
+          "colorMode": "background"
+        }
+      },
+      {
+        "id": 6,
+        "title": "Top Anomaly Sources",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "topk(10, sum by (metric_name) (genesis_anomaly_count_by_metric))",
+            "legendFormat": "{{ metric_name }}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 20
+        },
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "pieType": "pie",
+          "displayLabels": ["name", "percent"]
+        }
+      },
+      {
+        "id": 7,
+        "title": "IP Address Reputation Analysis",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "topk(20, sum by (ip_address) (genesis_security_requests_by_ip))",
+            "legendFormat": "{{ ip_address }}",
+            "refId": "A",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 100
+                },
+                {
+                  "color": "red",
+                  "value": 1000
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 20
+        },
+        "options": {
+          "showHeader": true
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {},
+              "renameByName": {
+                "ip_address": "IP Address",
+                "Value": "Request Count"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "HMAC Validation Status",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(genesis_hmac_validation_success[5m])",
+            "legendFormat": "Valid HMAC/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(genesis_hmac_validation_failed[5m])",
+            "legendFormat": "Invalid HMAC/sec",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 28
+        },
+        "yAxes": [
+          {
+            "label": "Validations/sec",
+            "min": 0
+          }
+        ],
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true
+        }
+      },
+      {
+        "id": 9,
+        "title": "Pattern-Based Anomaly Alerts",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"genesis-anomaly-detector\"} |= \"pattern_anomaly\" | json",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 28
+        },
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 10,
+        "title": "Threat Intelligence Feed",
+        "type": "news",
+        "targets": [],
+        "fieldConfig": {
+          "defaults": {}
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 36
+        },
+        "options": {
+          "feedUrl": "https://feeds.feedburner.com/eset/blog",
+          "showImage": false,
+          "showDate": true
+        }
+      }
+    ]
+  }
+}

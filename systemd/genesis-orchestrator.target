@@ -1,0 +1,8 @@
+[Unit]
+Description=GENESIS Orchestrator Complete System
+Wants=genesis-backup.service genesis-failover.service genesis-retention.timer
+After=genesis-backup.service genesis-failover.service
+AllowIsolate=yes
+
+[Install]
+WantedBy=multi-user.target

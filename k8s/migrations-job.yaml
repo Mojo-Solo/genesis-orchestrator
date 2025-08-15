@@ -1,0 +1,402 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: genesis-migrations
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    component: migration
+    version: "{{ .Values.image.tag | default "latest" }}"
+  annotations:
+    migration.genesis.io/timestamp: "{{ now | date "2006-01-02T15:04:05Z" }}"
+    migration.genesis.io/environment: "{{ .Values.environment }}"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 1800  # 30 minutes timeout
+  ttlSecondsAfterFinished: 86400  # Keep for 24 hours for debugging
+  template:
+    metadata:
+      labels:
+        app: genesis-orchestrator
+        component: migration
+      annotations:
+        sidecar.istio.io/inject: "false"  # Disable service mesh for migration job
+    spec:
+      serviceAccountName: genesis-orchestrator
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+      initContainers:
+      # Wait for database to be ready
+      - name: wait-for-database
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for database to be ready..."
+          until nc -z mysql-primary 3306; do
+            echo "Database not ready, waiting..."
+            sleep 5
+          done
+          echo "Database is ready!"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      containers:
+      - name: migration
+        image: ghcr.io/genesis/orchestrator:{{ .Values.image.tag | default "latest" }}
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting database migration..."
+          
+          # Check database connectivity
+          php artisan db:monitor --max-connections=5
+          
+          # Run pre-migration checks
+          echo "Running pre-migration checks..."
+          php artisan migrate:status
+          
+          # Create backup before migration
+          if [ "${ENVIRONMENT}" != "development" ]; then
+            echo "Creating pre-migration backup..."
+            mysqldump -h mysql-primary -u ${DB_USERNAME} -p${DB_PASSWORD} \
+              --single-transaction --routines --triggers \
+              ${DB_DATABASE} > /tmp/pre-migration-backup.sql
+            
+            # Upload backup to S3 if available
+            if command -v aws >/dev/null 2>&1; then
+              aws s3 cp /tmp/pre-migration-backup.sql \
+                s3://genesis-backups/${ENVIRONMENT}/pre-migration-$(date +%Y%m%d-%H%M%S).sql
+            fi
+          fi
+          
+          # Run migrations
+          echo "Running database migrations..."
+          php artisan migrate --force --no-interaction
+          
+          # Verify migration
+          echo "Verifying migration..."
+          php artisan migrate:status
+          
+          # Run post-migration checks
+          echo "Running post-migration checks..."
+          php artisan db:monitor --max-connections=5
+          
+          # Seed essential data if needed
+          if [ "${ENVIRONMENT}" = "development" ]; then
+            echo "Seeding development data..."
+            php artisan db:seed --class=DevelopmentSeeder --force
+          fi
+          
+          echo "Migration completed successfully!"
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: genesis-config
+              key: ENVIRONMENT
+        - name: DB_CONNECTION
+          value: mysql
+        - name: DB_HOST
+          value: mysql-primary
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: genesis-secrets
+              key: DB_DATABASE
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: genesis-secrets
+              key: DB_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: genesis-secrets
+              key: DB_PASSWORD
+        - name: REDIS_HOST
+          value: redis-primary
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: genesis-secrets
+              key: REDIS_PASSWORD
+              optional: true
+        - name: LOG_LEVEL
+          value: INFO
+        - name: MIGRATION_TIMEOUT
+          value: "1800"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: migration-cache
+          mountPath: /app/storage/migration
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: migration-cache
+        emptyDir: {}
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: genesis-migration-rollback
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    component: migration-rollback
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900  # 15 minutes timeout for rollback
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: genesis-orchestrator
+        component: migration-rollback
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: genesis-orchestrator
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+      containers:
+      - name: migration-rollback
+        image: ghcr.io/genesis/orchestrator:{{ .Values.image.tag | default "latest" }}
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting database migration rollback..."
+          
+          # Check current migration status
+          echo "Current migration status:"
+          php artisan migrate:status
+          
+          # Create backup before rollback
+          echo "Creating pre-rollback backup..."
+          mysqldump -h mysql-primary -u ${DB_USERNAME} -p${DB_PASSWORD} \
+            --single-transaction --routines --triggers \
+            ${DB_DATABASE} > /tmp/pre-rollback-backup.sql
+          
+          # Upload backup to S3 if available
+          if command -v aws >/dev/null 2>&1; then
+            aws s3 cp /tmp/pre-rollback-backup.sql \
+              s3://genesis-backups/${ENVIRONMENT}/pre-rollback-$(date +%Y%m%d-%H%M%S).sql
+          fi
+          
+          # Determine rollback steps
+          ROLLBACK_STEPS=${ROLLBACK_STEPS:-1}
+          echo "Rolling back ${ROLLBACK_STEPS} migration(s)..."
+          
+          # Perform rollback
+          for i in $(seq 1 ${ROLLBACK_STEPS}); do
+            echo "Rolling back migration step ${i}..."
+            php artisan migrate:rollback --step=1 --force --no-interaction
+          done
+          
+          # Verify rollback
+          echo "Post-rollback migration status:"
+          php artisan migrate:status
+          
+          # Verify database connectivity
+          php artisan db:monitor --max-connections=5
+          
+          echo "Migration rollback completed successfully!"
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: genesis-config
+              key: ENVIRONMENT
+        - name: DB_CONNECTION
+          value: mysql
+        - name: DB_HOST
+          value: mysql-primary
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: genesis-secrets
+              key: DB_DATABASE
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: genesis-secrets
+              key: DB_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: genesis-secrets
+              key: DB_PASSWORD
+        - name: ROLLBACK_STEPS
+          value: "1"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: genesis-migration-check
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    component: migration-check
+spec:
+  schedule: "0 6 * * *"  # Daily at 6 AM UTC
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: genesis-orchestrator
+            component: migration-check
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          serviceAccountName: genesis-orchestrator
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 3000
+            fsGroup: 2000
+          containers:
+          - name: migration-check
+            image: ghcr.io/genesis/orchestrator:{{ .Values.image.tag | default "latest" }}
+            command: ["/bin/bash"]
+            args:
+            - -c
+            - |
+              set -euo pipefail
+              
+              echo "Running daily migration status check..."
+              
+              # Check migration status
+              php artisan migrate:status
+              
+              # Check for pending migrations
+              PENDING=$(php artisan migrate:status --pending 2>/dev/null | wc -l || echo "0")
+              
+              if [ "$PENDING" -gt 0 ]; then
+                echo "WARNING: $PENDING pending migrations detected"
+                # Send alert if monitoring is configured
+                curl -X POST "${ALERT_WEBHOOK:-}" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"text\":\"WARNING: $PENDING pending migrations in ${ENVIRONMENT}\"}" || true
+              else
+                echo "No pending migrations found"
+              fi
+              
+              # Verify database integrity
+              echo "Checking database integrity..."
+              php artisan db:monitor --max-connections=5
+              
+              echo "Migration check completed"
+            env:
+            - name: ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: genesis-config
+                  key: ENVIRONMENT
+            - name: DB_CONNECTION
+              value: mysql
+            - name: DB_HOST
+              value: mysql-primary
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: genesis-secrets
+                  key: DB_DATABASE
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: genesis-secrets
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: genesis-secrets
+                  key: DB_PASSWORD
+            - name: ALERT_WEBHOOK
+              valueFrom:
+                secretKeyRef:
+                  name: genesis-secrets
+                  key: ALERT_WEBHOOK
+                  optional: true
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 250m
+                memory: 512Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          volumes:
+          - name: tmp
+            emptyDir: {}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1

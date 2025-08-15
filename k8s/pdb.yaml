@@ -1,0 +1,78 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: genesis-orchestrator-pdb
+  namespace: genesis-orchestrator
+  labels:
+    app: genesis-orchestrator
+    component: availability
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: genesis-orchestrator
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: temporal-worker-pdb
+  namespace: genesis-orchestrator
+  labels:
+    app: temporal-worker
+    component: availability
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: temporal-worker
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mysql-primary-pdb
+  namespace: genesis-orchestrator
+  labels:
+    app: mysql-primary
+    component: availability
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: mysql-primary
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-primary-pdb
+  namespace: genesis-orchestrator
+  labels:
+    app: redis-primary
+    component: availability
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis-primary
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: temporal-pdb
+  namespace: genesis-orchestrator
+  labels:
+    app: temporal
+    component: availability
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: temporal
+  unhealthyPodEvictionPolicy: IfHealthyBudget

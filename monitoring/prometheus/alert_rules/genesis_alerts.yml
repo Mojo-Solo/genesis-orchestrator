@@ -1,0 +1,261 @@
+groups:
+  - name: genesis_orchestrator_alerts
+    rules:
+      # High-level orchestrator health
+      - alert: GenesisOrchestratorDown
+        expr: up{job="genesis-orchestrator"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: orchestrator
+          tier: 1
+        annotations:
+          summary: "Genesis Orchestrator is down"
+          description: "Genesis Orchestrator has been down for more than 30 seconds"
+          runbook_url: "https://docs.genesis.ai/runbooks/orchestrator-down"
+
+      - alert: GenesisHealthCheckFailed
+        expr: up{job="genesis-health"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          component: health
+          tier: 2
+        annotations:
+          summary: "Genesis health check failing"
+          description: "Health check endpoint has been failing for {{ $value }} minutes"
+
+      # Performance alerts
+      - alert: HighOrchestrationLatency
+        expr: genesis_orchestrator_average_latency_ms > 5000
+        for: 2m
+        labels:
+          severity: warning
+          component: performance
+          tier: 2
+        annotations:
+          summary: "High orchestration latency detected"
+          description: "Average orchestration latency is {{ $value }}ms, exceeding 5s threshold"
+
+      - alert: CriticalOrchestrationLatency
+        expr: genesis_orchestrator_average_latency_ms > 10000
+        for: 1m
+        labels:
+          severity: critical
+          component: performance
+          tier: 1
+        annotations:
+          summary: "Critical orchestration latency"
+          description: "Average orchestration latency is {{ $value }}ms, exceeding 10s critical threshold"
+
+      # Error rate alerts
+      - alert: HighFailureRate
+        expr: (genesis_orchestrator_failed_runs / genesis_orchestrator_total_runs) * 100 > 5
+        for: 3m
+        labels:
+          severity: warning
+          component: reliability
+          tier: 2
+        annotations:
+          summary: "High orchestration failure rate"
+          description: "Failure rate is {{ $value }}%, exceeding 5% threshold"
+
+      - alert: CriticalFailureRate
+        expr: (genesis_orchestrator_failed_runs / genesis_orchestrator_total_runs) * 100 > 15
+        for: 1m
+        labels:
+          severity: critical
+          component: reliability
+          tier: 1
+        annotations:
+          summary: "Critical orchestration failure rate"
+          description: "Failure rate is {{ $value }}%, exceeding 15% critical threshold"
+
+      # Token budget alerts
+      - alert: TokenBudgetExhaustion
+        expr: genesis_router_total_token_budget > 45000
+        for: 1m
+        labels:
+          severity: warning
+          component: budget
+          tier: 2
+        annotations:
+          summary: "Token budget approaching limit"
+          description: "Total token budget is {{ $value }}, approaching 50k limit"
+
+      - alert: TokenBudgetCritical
+        expr: genesis_router_total_token_budget > 48000
+        for: 30s
+        labels:
+          severity: critical
+          component: budget
+          tier: 1
+        annotations:
+          summary: "Token budget critical"
+          description: "Total token budget is {{ $value }}, very close to 50k circuit breaker"
+
+      # Stability alerts
+      - alert: StabilityScoreDropped
+        expr: genesis_stability_current_score < 0.95
+        for: 2m
+        labels:
+          severity: warning
+          component: stability
+          tier: 2
+        annotations:
+          summary: "System stability score dropped"
+          description: "Stability score is {{ $value }}, below 95% threshold"
+
+      - alert: StabilityScoreCritical
+        expr: genesis_stability_current_score < 0.90
+        for: 1m
+        labels:
+          severity: critical
+          component: stability
+          tier: 1
+        annotations:
+          summary: "Critical stability score"
+          description: "Stability score is {{ $value }}, below 90% critical threshold"
+
+      # Security alerts
+      - alert: SecurityViolationSpike
+        expr: increase(genesis_security_violations_24h[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+          component: security
+          tier: 2
+        annotations:
+          summary: "Security violation spike detected"
+          description: "{{ $value }} security violations in the last 5 minutes"
+
+      - alert: AuthenticationFailureSpike
+        expr: increase(genesis_security_auth_failures_24h[5m]) > 20
+        for: 1m
+        labels:
+          severity: warning
+          component: security
+          tier: 2
+        annotations:
+          summary: "Authentication failure spike"
+          description: "{{ $value }} authentication failures in the last 5 minutes"
+
+      # Resource utilization
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 3m
+        labels:
+          severity: warning
+          component: resources
+          tier: 2
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 3m
+        labels:
+          severity: warning
+          component: resources
+          tier: 2
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          component: resources
+          tier: 1
+        annotations:
+          summary: "Disk space critically low"
+          description: "Disk usage is {{ $value }}% on {{ $labels.instance }}"
+
+  - name: genesis_router_alerts
+    rules:
+      # Router-specific alerts
+      - alert: RouterSelectionTimeHigh
+        expr: genesis_router_avg_selection_time_ms > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: router
+          tier: 2
+        annotations:
+          summary: "Router selection time high"
+          description: "Average router selection time is {{ $value }}ms, exceeding 1s threshold"
+
+      - alert: RouterEfficiencyLow
+        expr: genesis_router_efficiency_gain < 15
+        for: 5m
+        labels:
+          severity: warning
+          component: router
+          tier: 2
+        annotations:
+          summary: "Router efficiency below threshold"
+          description: "Router efficiency gain is {{ $value }}%, below 15% threshold"
+
+      - alert: RouterCacheHitRateLow
+        expr: genesis_router_cache_hit_rate < 0.7
+        for: 3m
+        labels:
+          severity: warning
+          component: router
+          tier: 2
+        annotations:
+          summary: "Router cache hit rate low"
+          description: "Cache hit rate is {{ $value }}, below 70% threshold"
+
+  - name: genesis_database_alerts
+    rules:
+      # Database health
+      - alert: DatabaseConnectionsHigh
+        expr: mysql_global_status_threads_connected / mysql_global_variables_max_connections > 0.8
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+          tier: 2
+        annotations:
+          summary: "High database connections"
+          description: "{{ $value }}% of max connections in use"
+
+      - alert: DatabaseSlowQueries
+        expr: increase(mysql_global_status_slow_queries[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+          component: database
+          tier: 2
+        annotations:
+          summary: "Database slow queries detected"
+          description: "{{ $value }} slow queries in the last 5 minutes"
+
+  - name: genesis_sla_alerts
+    rules:
+      # SLA monitoring for 99.9% uptime
+      - alert: SLABreach
+        expr: (1 - (up{job="genesis-orchestrator"})) * 100 > 0.1
+        for: 1m
+        labels:
+          severity: critical
+          component: sla
+          tier: 1
+        annotations:
+          summary: "SLA breach detected"
+          description: "Orchestrator availability below 99.9% SLA threshold"
+
+      - alert: SLAWarning
+        expr: (1 - (avg_over_time(up{job="genesis-orchestrator"}[1h]))) * 100 > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: sla
+          tier: 2
+        annotations:
+          summary: "SLA warning - approaching breach"
+          description: "Orchestrator availability trending toward SLA breach"

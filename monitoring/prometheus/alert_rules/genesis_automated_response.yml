@@ -1,0 +1,205 @@
+groups:
+  - name: genesis_automated_response
+    rules:
+      # Automated Circuit Breaker Triggers
+      - alert: AutoCircuitBreakerTriggered
+        expr: |
+          (
+            rate(genesis_orchestrator_failed_runs[2m]) > 
+            rate(genesis_orchestrator_total_runs[2m]) * 0.5
+          ) and (
+            rate(genesis_orchestrator_total_runs[2m]) > 0.1
+          )
+        for: 30s
+        labels:
+          severity: critical
+          component: automation
+          tier: 1
+          action: circuit_breaker
+        annotations:
+          summary: "Automated circuit breaker should be triggered"
+          description: "Failure rate >50% for 30s - automatic protection needed"
+          automation_action: "trigger_circuit_breaker"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/circuit-breaker"
+
+      # Automated Scaling Triggers
+      - alert: AutoScaleUpRequired
+        expr: |
+          (
+            rate(genesis_orchestrator_total_runs[5m]) > 10 and
+            genesis_orchestrator_average_latency_ms > 3000
+          ) or (
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          ) or (
+            100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+          )
+        for: 2m
+        labels:
+          severity: warning
+          component: automation
+          tier: 2
+          action: scale_up
+        annotations:
+          summary: "Automated scaling up recommended"
+          description: "High load detected - consider scaling up resources"
+          automation_action: "scale_up"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/scale-up"
+
+      # Automated Cache Clearing
+      - alert: AutoCacheClearRequired
+        expr: |
+          genesis_router_cache_hit_rate < 0.3 and
+          rate(genesis_orchestrator_total_runs[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: automation
+          tier: 2
+          action: cache_clear
+        annotations:
+          summary: "Automated cache clearing recommended"
+          description: "Cache hit rate {{ $value }} is critically low"
+          automation_action: "clear_cache"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/clear-cache"
+
+      # Automated Log Rotation
+      - alert: AutoLogRotationRequired
+        expr: |
+          (
+            (1 - (node_filesystem_avail_bytes{mountpoint="/var/log"} / 
+                  node_filesystem_size_bytes{mountpoint="/var/log"})) * 100
+          ) > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: automation
+          tier: 2
+          action: log_rotation
+        annotations:
+          summary: "Automated log rotation required"
+          description: "Log partition {{ $value }}% full - rotation needed"
+          automation_action: "rotate_logs"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/rotate-logs"
+
+      # Automated Database Maintenance
+      - alert: AutoDatabaseMaintenanceRequired
+        expr: |
+          mysql_global_status_slow_queries > 100
+        for: 15m
+        labels:
+          severity: warning
+          component: automation
+          tier: 2
+          action: database_maintenance
+        annotations:
+          summary: "Automated database maintenance recommended"
+          description: "{{ $value }} slow queries detected - maintenance needed"
+          automation_action: "database_maintenance"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/db-maintenance"
+
+  - name: genesis_self_healing
+    rules:
+      # Self-Healing: Restart Unhealthy Services
+      - alert: AutoRestartUnhealthyService
+        expr: |
+          up{job="genesis-orchestrator"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: self_healing
+          tier: 1
+          action: restart_service
+        annotations:
+          summary: "Self-healing service restart triggered"
+          description: "Genesis orchestrator is down - attempting restart"
+          automation_action: "restart_service"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/restart-service"
+          max_attempts: "3"
+          backoff_minutes: "2"
+
+      # Self-Healing: Memory Cleanup
+      - alert: AutoMemoryCleanup
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 2m
+        labels:
+          severity: warning
+          component: self_healing
+          tier: 2
+          action: memory_cleanup
+        annotations:
+          summary: "Self-healing memory cleanup triggered"
+          description: "Memory usage {{ $value }}% - performing cleanup"
+          automation_action: "memory_cleanup"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/memory-cleanup"
+
+      # Self-Healing: Connection Pool Reset
+      - alert: AutoConnectionPoolReset
+        expr: |
+          mysql_global_status_threads_connected > 
+          (mysql_global_variables_max_connections * 0.9)
+        for: 3m
+        labels:
+          severity: warning
+          component: self_healing
+          tier: 2
+          action: reset_connections
+        annotations:
+          summary: "Self-healing connection pool reset triggered"
+          description: "Database connections at {{ $value }}% - resetting pool"
+          automation_action: "reset_connection_pool"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/reset-connections"
+
+  - name: genesis_escalation_automation
+    rules:
+      # Escalation: Multiple Critical Alerts
+      - alert: AutoEscalateMultipleCritical
+        expr: |
+          count(ALERTS{alertname=~"Genesis.*", severity="critical"}) >= 3
+        for: 5m
+        labels:
+          severity: critical
+          component: escalation
+          tier: 1
+          action: escalate_incident
+        annotations:
+          summary: "Multiple critical alerts - escalating incident"
+          description: "{{ $value }} critical alerts active - escalating to on-call"
+          automation_action: "escalate_incident"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/escalate"
+          escalation_level: "manager"
+
+      # Escalation: Extended Downtime
+      - alert: AutoEscalateExtendedDowntime
+        expr: |
+          up{job="genesis-orchestrator"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: escalation
+          tier: 1
+          action: escalate_downtime
+        annotations:
+          summary: "Extended downtime - escalating to senior on-call"
+          description: "System down for 5+ minutes - senior escalation needed"
+          automation_action: "escalate_extended_downtime"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/escalate-downtime"
+          escalation_level: "senior"
+
+      # Escalation: SLA Breach
+      - alert: AutoEscalateSLABreach
+        expr: |
+          ALERTS{alertname=~"SLA.*Breach", severity="critical"}
+        for: 1m
+        labels:
+          severity: critical
+          component: escalation
+          tier: 1
+          action: escalate_sla
+        annotations:
+          summary: "SLA breach - escalating to management"
+          description: "Customer SLA violated - management notification required"
+          automation_action: "escalate_sla_breach"
+          webhook_url: "${AUTOMATION_WEBHOOK_URL}/escalate-sla"
+          escalation_level: "executive"
+          notify_customers: "true"

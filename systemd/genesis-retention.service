@@ -1,0 +1,41 @@
+[Unit]
+Description=GENESIS Orchestrator Data Retention Manager
+After=network.target genesis-backup.service
+Wants=genesis-backup.service
+PartOf=genesis-orchestrator.target
+
+[Service]
+Type=oneshot
+User=genesis
+Group=genesis
+WorkingDirectory=/opt/genesis
+ExecStart=/opt/genesis/scripts/backup/data_retention_manager.sh run
+
+# Environment variables
+Environment=BACKUP_ROOT_DIR=/var/backups/genesis
+Environment=RETENTION_CONFIG_FILE=/etc/genesis/retention_policy.json
+Environment=ARCHIVE_ROOT_DIR=/var/archives/genesis
+Environment=S3_ARCHIVE_BUCKET=genesis-archives
+Environment=S3_REGION=us-west-2
+Environment=GDPR_RETENTION_DAYS=2555
+Environment=SOX_RETENTION_DAYS=2555
+Environment=HIPAA_RETENTION_DAYS=2555
+Environment=PCI_RETENTION_DAYS=365
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/genesis /var/archives/genesis /var/log/genesis /etc/genesis
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Resource limits
+LimitNOFILE=4096
+LimitNPROC=1024
+MemoryMax=2G
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target
