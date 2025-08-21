@@ -1,5 +1,14 @@
 {
   "mcpServers": {
+    "genesis-rag": {
+      "command": "npx",
+      "args": ["next", "dev"],
+      "env": {
+        "NODE_ENV": "development",
+        "PORT": "3000"
+      },
+      "description": "Genesis RAG MCP - Semantic vector search and content retrieval with Pinecone/pgvector backend"
+    },
     "zen-mcp": {
       "command": "python",
       "args": ["zen-mcp/server.py"],
@@ -47,7 +56,13 @@
       "live-documentation-injection",
       "semantic-code-editing",
       "symbol-level-operations",
-      "cross-language-support"
+      "cross-language-support",
+      "semantic-vector-search",
+      "private-corpus-retrieval",
+      "llm-reranking",
+      "pinecone-pgvector-backend",
+      "sse-transport-support",
+      "chatgpt-research-integration"
     ],
     "defaultPort": 5500,
     "previewUrl": "http://localhost:5500",
@@ -55,7 +70,13 @@
     "enhancedFeatures": {
       "multiModelCollaboration": "Zen MCP enables collaboration between Claude, GPT-4, Gemini for better code review and analysis",
       "liveDocumentation": "Context7 injects up-to-date documentation from official sources to prevent API hallucinations",
-      "semanticEditing": "Serena provides IDE-like symbol finding, navigation, and precise code editing across 16+ languages"
+      "semanticEditing": "Serena provides IDE-like symbol finding, navigation, and precise code editing across 16+ languages",
+      "semanticVectorSearch": "Genesis RAG MCP provides semantic search over private corpus with OpenAI embeddings",
+      "contentRetrieval": "Full chunk content retrieval by ID with metadata and context preservation",
+      "llmReranking": "Optional LLM-powered re-ranking for precision at K results",
+      "multipleBackends": "Switchable Pinecone/pgvector backends for different deployment scenarios",
+      "sseTransport": "Server-Sent Events support for ChatGPT Research and real-time streaming",
+      "securityTokenGuard": "Bearer token authentication with configurable CONNECTOR_TOKEN protection"
     }
   }
 }

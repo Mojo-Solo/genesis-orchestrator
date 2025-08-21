@@ -37,7 +37,7 @@ export function ProjectStatusTable() {
             <tr key={w} className="border-b">
               <td className="py-2">WK{w}</td>
               {quarters.map((q) => {
-                const cell = projects[q][w - 1];
+                const cell = projects[q as keyof typeof projects][w - 1];
                 return (
                   <td key={q+"-"+w} className="py-2 pr-4">
                     <div className="flex items-center gap-2">
