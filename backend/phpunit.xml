@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="./vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         processIsolation="false"
+         stopOnFailure="false"
+         convertDeprecationsToExceptions="true"
+         convertErrorsToExceptions="true"
+         convertNoticesToExceptions="true"
+         convertWarningsToExceptions="true">
+    
+    <testsuites>
+        <!-- Unit Tests -->
+        <testsuite name="Unit">
+            <directory suffix="Test.php">./tests/Unit</directory>
+        </testsuite>
+        
+        <!-- Feature Tests -->
+        <testsuite name="Feature">
+            <directory suffix="Test.php">./tests/Feature</directory>
+        </testsuite>
+        
+        <!-- Integration Tests -->
+        <testsuite name="Integration">
+            <directory suffix="Test.php">./tests/Integration</directory>
+        </testsuite>
+        
+        <!-- Security Tests -->
+        <testsuite name="Security">
+            <directory suffix="Test.php">./tests/Security</directory>
+        </testsuite>
+        
+        <!-- Performance Tests -->
+        <testsuite name="Performance">
+            <directory suffix="Test.php">./tests/Performance</directory>
+        </testsuite>
+        
+        <!-- All Tests -->
+        <testsuite name="All">
+            <directory suffix="Test.php">./tests</directory>
+        </testsuite>
+    </testsuites>
+    
+    <!-- Code Coverage Configuration -->
+    <coverage processUncoveredFiles="true">
+        <include>
+            <directory suffix=".php">./app</directory>
+        </include>
+        <exclude>
+            <directory suffix=".php">./app/Console/Commands</directory>
+            <file>./app/Http/Kernel.php</file>
+            <file>./app/Exceptions/Handler.php</file>
+            <file>./app/Providers/RouteServiceProvider.php</file>
+            <directory>./app/Http/Middleware</directory>
+        </exclude>
+        <report>
+            <html outputDirectory="storage/coverage/html"/>
+            <clover outputFile="storage/coverage/clover.xml"/>
+            <cobertura outputFile="storage/coverage/cobertura.xml"/>
+            <crap4j outputFile="storage/coverage/crap4j.xml" threshold="50"/>
+            <text outputFile="storage/coverage/text.txt" showUncoveredFiles="false" showOnlySummary="true"/>
+        </report>
+    </coverage>
+    
+    <!-- PHP Configuration -->
+    <php>
+        <server name="APP_ENV" value="testing"/>
+        <server name="APP_KEY" value="base64:TEST_KEY_FOR_TESTING_ONLY"/>
+        <server name="APP_DEBUG" value="true"/>
+        <server name="BCRYPT_ROUNDS" value="4"/>
+        <server name="CACHE_DRIVER" value="array"/>
+        <server name="DB_CONNECTION" value="sqlite"/>
+        <server name="DB_DATABASE" value=":memory:"/>
+        <server name="MAIL_MAILER" value="array"/>
+        <server name="QUEUE_CONNECTION" value="sync"/>
+        <server name="SESSION_DRIVER" value="array"/>
+        <server name="TELESCOPE_ENABLED" value="false"/>
+        <server name="BROADCAST_DRIVER" value="log"/>
+        
+        <!-- Test-specific configurations -->
+        <server name="OPENAI_API_KEY" value="test-key"/>
+        <server name="FIREFLIES_API_KEY" value="test-key"/>
+        <server name="PINECONE_API_KEY" value="test-key"/>
+        <server name="PINECONE_ENVIRONMENT" value="test"/>
+        <server name="PINECONE_INDEX" value="test-index"/>
+        
+        <!-- Security testing configurations -->
+        <server name="SECURITY_TESTING_ENABLED" value="true"/>
+        <server name="RATE_LIMITING_DISABLED" value="true"/>
+        <server name="MFA_TESTING_MODE" value="true"/>
+        
+        <!-- Performance testing configurations -->
+        <server name="PERFORMANCE_TESTING" value="true"/>
+        <server name="MAX_EXECUTION_TIME" value="30"/>
+        <server name="MAX_MEMORY_USAGE" value="128M"/>
+    </php>
+    
+    <!-- Extensions -->
+    <extensions>
+        <!-- Code Coverage Extension -->
+        <extension class="Spatie\LaravelIgnition\Recorders\DumpRecorder\DumpHandler"/>
+        
+        <!-- Custom Test Extensions -->
+        <extension class="Tests\Extensions\DatabaseAssertions"/>
+        <extension class="Tests\Extensions\SecurityTestExtension"/>
+        <extension class="Tests\Extensions\PerformanceTestExtension"/>
+    </extensions>
+    
+    <!-- Logging -->
+    <logging>
+        <junit outputFile="storage/logs/junit.xml"/>
+        <teamcity outputFile="storage/logs/teamcity.txt"/>
+        <testdoxHtml outputFile="storage/logs/testdox.html"/>
+        <testdoxText outputFile="storage/logs/testdox.txt"/>
+        <testdoxXml outputFile="storage/logs/testdox.xml"/>
+    </logging>
+    
+    <!-- Groups for selective test execution -->
+    <groups>
+        <include>
+            <group>unit</group>
+            <group>feature</group>
+            <group>integration</group>
+            <group>security</group>
+            <group>performance</group>
+        </include>
+        <exclude>
+            <group>slow</group>
+            <group>external</group>
+            <group>manual</group>
+        </exclude>
+    </groups>
+</phpunit>

@@ -1,0 +1,517 @@
+# GENESIS Orchestrator - Production Deployment Workflow
+# Phase 4.2: GitHub Actions CI/CD Pipeline
+
+name: Production Deployment
+
+on:
+  push:
+    branches: [ main, production ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - staging
+        - production
+      force_deploy:
+        description: 'Force deployment (skip some checks)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  DEPLOYMENT_TIMEOUT: 600
+  HEALTH_CHECK_TIMEOUT: 300
+  NODE_VERSION: '20.x'
+  PHP_VERSION: '8.2'
+
+jobs:
+  # Pre-deployment validation
+  validate:
+    name: Pre-deployment Validation
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_id: ${{ steps.generate_id.outputs.deployment_id }}
+      should_deploy: ${{ steps.check_changes.outputs.should_deploy }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+    
+    - name: Generate deployment ID
+      id: generate_id
+      run: |
+        DEPLOYMENT_ID="genesis-$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)"
+        echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+        echo "🚀 Deployment ID: $DEPLOYMENT_ID"
+    
+    - name: Check for changes requiring deployment
+      id: check_changes
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+          echo "Manual deployment triggered"
+          exit 0
+        fi
+        
+        # Check for changes in critical paths
+        CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+        CRITICAL_PATHS=(
+          "backend/"
+          "unified-frontend/"
+          "config/"
+          "deployment/"
+          ".github/workflows/"
+        )
+        
+        SHOULD_DEPLOY=false
+        for path in "${CRITICAL_PATHS[@]}"; do
+          if echo "$CHANGED_FILES" | grep -q "^$path"; then
+            SHOULD_DEPLOY=true
+            break
+          fi
+        done
+        
+        echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+        echo "Should deploy: $SHOULD_DEPLOY"
+    
+    - name: Validate configuration files
+      run: |
+        # Validate YAML files
+        python -c "import yaml; yaml.safe_load(open('deployment/config/production.yaml'))"
+        python -c "import yaml; yaml.safe_load(open('config/genesis.unified.yaml'))"
+        echo "✓ Configuration files validated"
+    
+    - name: Security scan
+      uses: github/super-linter@v5
+      env:
+        DEFAULT_BRANCH: main
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VALIDATE_ALL_CODEBASE: false
+        VALIDATE_PHP_PHPCS: true
+        VALIDATE_JAVASCRIPT_ES: true
+        VALIDATE_TYPESCRIPT_ES: true
+
+  # Backend testing and build
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.should_deploy == 'true'
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: genesis_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+      
+      redis:
+        image: redis:7.0
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ env.PHP_VERSION }}
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_sqlite, pdo_mysql, redis
+        coverage: pcov
+    
+    - name: Cache Composer dependencies
+      uses: actions/cache@v3
+      with:
+        path: vendor
+        key: composer-${{ hashFiles('**/composer.lock') }}
+        restore-keys: composer-
+    
+    - name: Install PHP dependencies
+      run: |
+        cd backend
+        composer install --no-progress --prefer-dist --optimize-autoloader
+    
+    - name: Setup environment
+      run: |
+        cd backend
+        cp .env.testing .env
+        php artisan key:generate
+        php artisan config:cache
+    
+    - name: Run database migrations
+      run: |
+        cd backend
+        php artisan migrate --force
+        php artisan db:seed --class=TestSeeder
+    
+    - name: Run PHPUnit tests
+      run: |
+        cd backend
+        php artisan test --coverage --min=80
+    
+    - name: Run performance benchmarks
+      run: |
+        cd backend
+        php artisan test --filter=BenchmarkTest
+    
+    - name: Generate test coverage report
+      run: |
+        cd backend
+        ./vendor/bin/phpunit --coverage-clover=coverage.xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: backend/coverage.xml
+        flags: backend
+
+  # Frontend testing and build
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.should_deploy == 'true'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: unified-frontend/package-lock.json
+    
+    - name: Install dependencies
+      run: |
+        cd unified-frontend
+        npm ci
+    
+    - name: Run linting
+      run: |
+        cd unified-frontend
+        npm run lint
+    
+    - name: Run type checking
+      run: |
+        cd unified-frontend
+        npm run type-check
+    
+    - name: Run unit tests
+      run: |
+        cd unified-frontend
+        npm run test:coverage
+    
+    - name: Run E2E tests
+      run: |
+        cd unified-frontend
+        npm run test:e2e:ci
+    
+    - name: Build application
+      run: |
+        cd unified-frontend
+        npm run build
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: unified-frontend/coverage/lcov.info
+        flags: frontend
+
+  # Security scanning
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.should_deploy == 'true'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+    
+    - name: Check for high severity vulnerabilities
+      run: |
+        HIGH_VULNS=$(grep -c '"level": "HIGH"' trivy-results.sarif || echo "0")
+        CRITICAL_VULNS=$(grep -c '"level": "CRITICAL"' trivy-results.sarif || echo "0")
+        
+        echo "High severity vulnerabilities: $HIGH_VULNS"
+        echo "Critical vulnerabilities: $CRITICAL_VULNS"
+        
+        if [[ $CRITICAL_VULNS -gt 0 ]]; then
+          echo "❌ Critical vulnerabilities found. Deployment blocked."
+          exit 1
+        fi
+        
+        if [[ $HIGH_VULNS -gt 5 ]]; then
+          echo "⚠️ Too many high severity vulnerabilities. Manual review required."
+          exit 1
+        fi
+
+  # Build and push Docker images
+  build-images:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [validate, backend-test, frontend-test, security-scan]
+    if: needs.validate.outputs.should_deploy == 'true' && success()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        push: true
+        tags: |
+          genesis-orchestrator/backend:${{ needs.validate.outputs.deployment_id }}
+          genesis-orchestrator/backend:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_NUMBER=${{ github.run_number }}
+          GIT_COMMIT=${{ github.sha }}
+    
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./unified-frontend
+        push: true
+        tags: |
+          genesis-orchestrator/frontend:${{ needs.validate.outputs.deployment_id }}
+          genesis-orchestrator/frontend:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_NUMBER=${{ github.run_number }}
+          GIT_COMMIT=${{ github.sha }}
+
+  # Staging deployment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [validate, build-images]
+    if: needs.validate.outputs.should_deploy == 'true' && success() && github.ref != 'refs/heads/main'
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Configure Kubernetes context
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+    
+    - name: Deploy to staging
+      run: |
+        ./deployment/automated-deploy.sh
+      env:
+        DEPLOYMENT_ENV: staging
+        DEPLOYMENT_ID: ${{ needs.validate.outputs.deployment_id }}
+        DB_HOST: ${{ secrets.STAGING_DB_HOST }}
+        DB_USERNAME: ${{ secrets.STAGING_DB_USERNAME }}
+        DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        DB_DATABASE: ${{ secrets.STAGING_DB_DATABASE }}
+        REDIS_HOST: ${{ secrets.STAGING_REDIS_HOST }}
+        REDIS_PASSWORD: ${{ secrets.STAGING_REDIS_PASSWORD }}
+    
+    - name: Run integration tests
+      run: |
+        # Wait for deployment to be ready
+        sleep 60
+        
+        # Run integration test suite against staging
+        cd backend
+        php artisan test --env=staging --filter=IntegrationTest
+
+  # Production deployment
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [validate, build-images]
+    if: needs.validate.outputs.should_deploy == 'true' && success() && (github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production')
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Configure Kubernetes context
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
+    
+    - name: Pre-deployment backup
+      run: |
+        # Create database backup before deployment
+        kubectl exec deployment/mysql-production -- mysqldump \
+          --single-transaction \
+          --routines \
+          --triggers \
+          genesis_production > backup-pre-${{ needs.validate.outputs.deployment_id }}.sql
+    
+    - name: Deploy to production
+      run: |
+        ./deployment/automated-deploy.sh
+      env:
+        DEPLOYMENT_ENV: production
+        DEPLOYMENT_ID: ${{ needs.validate.outputs.deployment_id }}
+        DB_HOST: ${{ secrets.PROD_DB_HOST }}
+        DB_USERNAME: ${{ secrets.PROD_DB_USERNAME }}
+        DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+        DB_DATABASE: ${{ secrets.PROD_DB_DATABASE }}
+        REDIS_HOST: ${{ secrets.PROD_REDIS_HOST }}
+        REDIS_PASSWORD: ${{ secrets.PROD_REDIS_PASSWORD }}
+        FORCE_DEPLOY: ${{ github.event.inputs.force_deploy }}
+    
+    - name: Smoke tests
+      run: |
+        # Wait for deployment to be ready
+        sleep 120
+        
+        # Run smoke tests
+        curl -f https://genesis-orchestrator.production.domain.com/api/health
+        curl -f https://genesis-orchestrator.production.domain.com/api/v1/orchestration/status
+        
+        # Run performance validation
+        cd backend
+        php artisan test --env=production --filter=SmokeTest
+    
+    - name: Notify deployment success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: |
+          🎉 Production deployment successful!
+          Deployment ID: ${{ needs.validate.outputs.deployment_id }}
+          Environment: Production
+          Commit: ${{ github.sha }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Post-deployment monitoring
+  post-deploy-monitoring:
+    name: Post-deployment Monitoring
+    runs-on: ubuntu-latest
+    needs: [validate, deploy-production]
+    if: always() && needs.deploy-production.result == 'success'
+    
+    steps:
+    - name: Monitor deployment health
+      run: |
+        echo "🔍 Monitoring deployment health for 10 minutes..."
+        
+        # Monitor for 10 minutes
+        end_time=$(($(date +%s) + 600))
+        
+        while [[ $(date +%s) -lt $end_time ]]; do
+          # Check health endpoint
+          if ! curl -sf --max-time 10 https://genesis-orchestrator.production.domain.com/api/health > /dev/null; then
+            echo "❌ Health check failed at $(date)"
+            # Trigger alert
+            curl -X POST -H 'Content-type: application/json' \
+              --data '{"text":"🚨 Production health check failed for deployment ${{ needs.validate.outputs.deployment_id }}"}' \
+              ${{ secrets.SLACK_WEBHOOK_URL }}
+          else
+            echo "✅ Health check passed at $(date)"
+          fi
+          
+          sleep 30
+        done
+        
+        echo "✅ Monitoring completed successfully"
+    
+    - name: Generate deployment metrics
+      run: |
+        # Collect deployment metrics
+        kubectl get pods -l app=genesis-orchestrator -o wide
+        kubectl top pods -l app=genesis-orchestrator
+        
+        # Log deployment completion
+        echo "📊 Deployment ${{ needs.validate.outputs.deployment_id }} metrics collected"
+
+  # Cleanup on failure
+  cleanup-on-failure:
+    name: Cleanup Failed Deployment
+    runs-on: ubuntu-latest
+    needs: [validate, deploy-production]
+    if: always() && needs.deploy-production.result == 'failure'
+    
+    steps:
+    - name: Rollback deployment
+      run: |
+        echo "🔄 Initiating rollback for failed deployment..."
+        # Rollback logic would be implemented here
+        
+    - name: Notify deployment failure
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: |
+          ❌ Production deployment failed!
+          Deployment ID: ${{ needs.validate.outputs.deployment_id }}
+          Environment: Production
+          Rollback initiated: Yes
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

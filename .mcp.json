@@ -1,0 +1,61 @@
+{
+  "mcpServers": {
+    "zen-mcp": {
+      "command": "python",
+      "args": ["zen-mcp/server.py"],
+      "env": {
+        "PYTHONPATH": "zen-mcp"
+      },
+      "description": "Zen MCP - Multi-model orchestration with Gemini, OpenAI, and more for enhanced code analysis and workflows"
+    },
+    "context7": {
+      "command": "node",
+      "args": ["zen-mcp/context7/dist/index.js"],
+      "env": {},
+      "description": "Context7 MCP - Live documentation injection for up-to-date API references and code examples"
+    },
+    "serena": {
+      "command": "uv",
+      "args": ["run", "serena-mcp-server"],
+      "cwd": "zen-mcp/serena",
+      "env": {},
+      "description": "Serena MCP - Semantic code editing with language server integration for precise symbol-level operations"
+    },
+    "browser-preview": {
+      "command": "browser-mcp",
+      "args": [],
+      "env": {},
+      "description": "Browser automation for UI testing and verification in Claude Code agent"
+    },
+    "file-watcher": {
+      "command": "python3",
+      "args": ["-m", "http.server"],
+      "env": {},
+      "description": "Fallback HTTP server if live-server is not available"
+    }
+  },
+  "agentConfig": {
+    "name": "Genesis Creator + Advanced MCP Suite",
+    "version": "2.0.0",
+    "description": "Enhanced Genesis Creator with Zen MCP (multi-model), Context7 (live docs), Serena (semantic editing), and live frontend preview",
+    "capabilities": [
+      "live-preview",
+      "browser-automation",
+      "file-watching", 
+      "real-time-reload",
+      "multi-model-orchestration",
+      "live-documentation-injection",
+      "semantic-code-editing",
+      "symbol-level-operations",
+      "cross-language-support"
+    ],
+    "defaultPort": 5500,
+    "previewUrl": "http://localhost:5500",
+    "supportedFileTypes": ["html", "css", "js", "json", "svg", "png", "jpg", "gif", "py", "php", "go", "rs", "java", "ts", "tsx", "vue", "svelte"],
+    "enhancedFeatures": {
+      "multiModelCollaboration": "Zen MCP enables collaboration between Claude, GPT-4, Gemini for better code review and analysis",
+      "liveDocumentation": "Context7 injects up-to-date documentation from official sources to prevent API hallucinations",
+      "semanticEditing": "Serena provides IDE-like symbol finding, navigation, and precise code editing across 16+ languages"
+    }
+  }
+}

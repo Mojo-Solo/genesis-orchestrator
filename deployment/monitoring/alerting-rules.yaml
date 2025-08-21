@@ -1,0 +1,346 @@
+# GENESIS Orchestrator - Prometheus Alerting Rules
+# Phase 4.2: Production monitoring alerts
+
+groups:
+  # Application Performance Alerts
+  - name: genesis-orchestrator-performance
+    interval: 30s
+    rules:
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.15
+        for: 2m
+        labels:
+          severity: warning
+          component: performance
+          team: platform
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s, above 150ms threshold"
+          runbook_url: "https://docs.genesis.com/runbooks/high-response-time"
+          dashboard: "https://grafana.genesis.com/d/app-performance"
+
+      - alert: CriticalResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 1m
+        labels:
+          severity: critical
+          component: performance
+          team: platform
+        annotations:
+          summary: "Critical response time detected"
+          description: "95th percentile response time is {{ $value }}s, above 500ms critical threshold"
+          runbook_url: "https://docs.genesis.com/runbooks/critical-response-time"
+
+      - alert: LowThroughput
+        expr: rate(http_requests_total[5m]) < 50
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+          team: platform
+        annotations:
+          summary: "Low throughput detected"
+          description: "Request rate is {{ $value }} req/s, below 50 req/s threshold"
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: reliability
+          team: platform
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }}, above 5% threshold"
+          runbook_url: "https://docs.genesis.com/runbooks/high-error-rate"
+
+  # LAG Engine Alerts
+  - name: lag-engine-alerts
+    interval: 30s
+    rules:
+      - alert: LAGEngineStabilityBelowTarget
+        expr: lag_stability_score < 0.986
+        for: 1m
+        labels:
+          severity: critical
+          component: lag-engine
+          team: ai-platform
+        annotations:
+          summary: "LAG Engine stability below 98.6% target"
+          description: "LAG stability score is {{ $value | humanizePercentage }}, below 98.6% requirement"
+          runbook_url: "https://docs.genesis.com/runbooks/lag-stability"
+
+      - alert: LAGProcessingTimeout
+        expr: lag_processing_duration_seconds > 30
+        for: 30s
+        labels:
+          severity: warning
+          component: lag-engine
+          team: ai-platform
+        annotations:
+          summary: "LAG processing timeout"
+          description: "LAG processing taking {{ $value }}s, above 30s timeout"
+
+      - alert: LAGMemoryUsageHigh
+        expr: lag_memory_usage_bytes / lag_memory_limit_bytes > 0.8
+        for: 2m
+        labels:
+          severity: warning
+          component: lag-engine
+          team: ai-platform
+        annotations:
+          summary: "LAG engine high memory usage"
+          description: "LAG memory usage at {{ $value | humanizePercentage }} of limit"
+
+  # RCR Router Alerts
+  - name: rcr-router-alerts
+    interval: 30s
+    rules:
+      - alert: RCRRoutingAccuracyBelowTarget
+        expr: rcr_routing_accuracy < 0.986
+        for: 1m
+        labels:
+          severity: critical
+          component: rcr-router
+          team: ai-platform
+        annotations:
+          summary: "RCR routing accuracy below 98.6% target"
+          description: "RCR accuracy is {{ $value | humanizePercentage }}, below 98.6% requirement"
+          runbook_url: "https://docs.genesis.com/runbooks/rcr-accuracy"
+
+      - alert: RCRContextOverflow
+        expr: rcr_context_buffer_usage > 0.9
+        for: 1m
+        labels:
+          severity: warning
+          component: rcr-router
+          team: ai-platform
+        annotations:
+          summary: "RCR context buffer near overflow"
+          description: "RCR context buffer usage at {{ $value | humanizePercentage }}"
+
+      - alert: RCRRoutingLatency
+        expr: rcr_routing_duration_seconds > 0.1
+        for: 30s
+        labels:
+          severity: warning
+          component: rcr-router
+          team: ai-platform
+        annotations:
+          summary: "RCR routing latency high"
+          description: "RCR routing taking {{ $value }}s, above 100ms threshold"
+
+  # Cache Performance Alerts
+  - name: cache-performance-alerts
+    interval: 30s
+    rules:
+      - alert: LowCacheHitRatio
+        expr: cache_hit_ratio < 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+          team: platform
+        annotations:
+          summary: "Low cache hit ratio"
+          description: "Cache hit ratio is {{ $value | humanizePercentage }}, below 85% target"
+          runbook_url: "https://docs.genesis.com/runbooks/cache-performance"
+
+      - alert: CacheMemoryPressure
+        expr: cache_memory_usage_bytes / cache_memory_limit_bytes > 0.9
+        for: 2m
+        labels:
+          severity: warning
+          component: cache
+          team: platform
+        annotations:
+          summary: "Cache memory pressure"
+          description: "Cache memory usage at {{ $value | humanizePercentage }} of limit"
+
+      - alert: CacheConnectionFailures
+        expr: rate(cache_connection_failures_total[5m]) > 5
+        for: 1m
+        labels:
+          severity: critical
+          component: cache
+          team: platform
+        annotations:
+          summary: "Cache connection failures"
+          description: "Cache connection failures at {{ $value }}/sec"
+
+  # Infrastructure Alerts
+  - name: infrastructure-alerts
+    interval: 30s
+    rules:
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+          team: platform
+        annotations:
+          summary: "Pod {{ $labels.pod }} is crash looping"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+
+      - alert: DeploymentReplicasMismatch
+        expr: kube_deployment_status_replicas != kube_deployment_status_replicas_available
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+          team: platform
+        annotations:
+          summary: "Deployment {{ $labels.deployment }} has mismatched replicas"
+          description: "Expected {{ $labels.replicas }} but have {{ $labels.replicas_available }} available"
+
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+          team: platform
+        annotations:
+          summary: "High memory usage in {{ $labels.pod }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total[5m]) / container_spec_cpu_quota * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+          team: platform
+        annotations:
+          summary: "High CPU usage in {{ $labels.pod }}"
+          description: "CPU usage is {{ $value }}% of limit"
+
+  # Database Alerts
+  - name: database-alerts
+    interval: 30s
+    rules:
+      - alert: DatabaseConnectionFailures
+        expr: rate(mysql_global_status_connection_errors_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+          team: platform
+        annotations:
+          summary: "Database connection failures"
+          description: "MySQL connection errors at {{ $value }}/sec"
+          runbook_url: "https://docs.genesis.com/runbooks/database-connections"
+
+      - alert: DatabaseSlowQueries
+        expr: rate(mysql_global_status_slow_queries[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          team: platform
+        annotations:
+          summary: "High number of slow queries"
+          description: "Slow queries at {{ $value }}/sec, above 10/sec threshold"
+
+      - alert: DatabaseReplicationLag
+        expr: mysql_slave_lag_seconds > 30
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+          team: platform
+        annotations:
+          summary: "Database replication lag"
+          description: "Replication lag is {{ $value }}s, above 30s threshold"
+
+      - alert: DatabaseHighConnections
+        expr: mysql_global_status_threads_connected / mysql_global_variables_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          team: platform
+        annotations:
+          summary: "High database connection usage"
+          description: "Connection usage at {{ $value | humanizePercentage }} of maximum"
+
+  # External Dependencies
+  - name: external-dependencies
+    interval: 30s
+    rules:
+      - alert: ExternalServiceDown
+        expr: probe_success == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: external-dependencies
+          team: platform
+        annotations:
+          summary: "External service {{ $labels.instance }} is down"
+          description: "Blackbox probe failed for {{ $labels.instance }}"
+          runbook_url: "https://docs.genesis.com/runbooks/external-dependencies"
+
+      - alert: ExternalServiceHighLatency
+        expr: probe_duration_seconds > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: external-dependencies
+          team: platform
+        annotations:
+          summary: "High latency to {{ $labels.instance }}"
+          description: "Probe latency is {{ $value }}s, above 5s threshold"
+
+  # Security Alerts
+  - name: security-alerts
+    interval: 30s
+    rules:
+      - alert: UnauthorizedAccess
+        expr: rate(http_requests_total{status="401"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          component: security
+          team: security
+        annotations:
+          summary: "High rate of unauthorized access attempts"
+          description: "401 responses at {{ $value }}/sec, above 10/sec threshold"
+
+      - alert: SuspiciousActivity
+        expr: rate(http_requests_total{status="403"}[5m]) > 5
+        for: 1m
+        labels:
+          severity: warning
+          component: security
+          team: security
+        annotations:
+          summary: "High rate of forbidden access attempts"
+          description: "403 responses at {{ $value }}/sec, above 5/sec threshold"
+
+  # Business Metrics
+  - name: business-metrics
+    interval: 60s
+    rules:
+      - alert: LowOrchestrationVolume
+        expr: rate(orchestration_requests_total[1h]) < 100
+        for: 15m
+        labels:
+          severity: warning
+          component: business
+          team: product
+        annotations:
+          summary: "Low orchestration request volume"
+          description: "Orchestration requests at {{ $value }}/hour, below 100/hour threshold"
+
+      - alert: OrchestrationFailureSpike
+        expr: rate(orchestration_failures_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: critical
+          component: business
+          team: product
+        annotations:
+          summary: "Orchestration failure spike"
+          description: "Orchestration failures at {{ $value }}/sec"
+          runbook_url: "https://docs.genesis.com/runbooks/orchestration-failures"

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genesis Frontend Preview Agent - Demo</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+</head>
+<body>
+    <header class="header">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h1>🧠 Genesis Creator</h1>
+                <span class="tagline">Live Frontend Preview Agent</span>
+            </div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#demo">Demo</a>
+                <a href="#setup">Setup</a>
+            </div>
+        </nav>
+    </header>
+
+    <main class="main-content">
+        <section class="hero" id="hero">
+            <div class="hero-content">
+                <h2 class="hero-title">🚀 Real-Time Frontend Development</h2>
+                <p class="hero-description">
+                    Experience live preview with Claude Code integration in Cursor. 
+                    Make changes and see them instantly reflected in your browser panel.
+                </p>
+                <div class="hero-actions">
+                    <button class="btn btn-primary" onclick="changeTheme()">🎨 Toggle Theme</button>
+                    <button class="btn btn-secondary" onclick="addElement()">➕ Add Element</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="features" id="features">
+            <h3>🔥 Key Features</h3>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h4>Instant Reload</h4>
+                    <p>Files auto-refresh via WebSocket injection</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h4>AI Integration</h4>
+                    <p>Claude Code can edit and verify UI changes</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h4>In-IDE Preview</h4>
+                    <p>No context switching - everything in Cursor</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔧</div>
+                    <h4>Low-Code Setup</h4>
+                    <p>Minimal configuration, maximum productivity</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="demo" id="demo">
+            <h3>🎮 Interactive Demo</h3>
+            <div class="demo-container">
+                <div class="color-picker">
+                    <label for="bg-color">Background Color:</label>
+                    <input type="color" id="bg-color" value="#1a1a1a" onchange="updateBackground(this.value)">
+                </div>
+                <div class="text-input">
+                    <label for="demo-text">Demo Text:</label>
+                    <input type="text" id="demo-text" value="Hello Genesis!" onchange="updateDemoText(this.value)">
+                </div>
+                <div class="demo-output" id="demo-output">
+                    Hello Genesis!
+                </div>
+            </div>
+        </section>
+
+        <section class="setup" id="setup">
+            <h3>⚙️ Quick Setup</h3>
+            <div class="setup-steps">
+                <div class="step">
+                    <span class="step-number">1</span>
+                    <div class="step-content">
+                        <h4>Install Dependencies</h4>
+                        <code>npm install -g live-server @anthropic-ai/claude-code</code>
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-number">2</span>
+                    <div class="step-content">
+                        <h4>Launch Preview</h4>
+                        <code>./preview.sh</code>
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span>
+                    <div class="step-content">
+                        <h4>Open in Cursor</h4>
+                        <code>Simple Browser: Show → http://localhost:5500</code>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>🚀 Genesis Creator Framework | Built with Claude Code & Cursor</p>
+        <div class="status-indicator" id="status">
+            <span class="status-dot"></span>
+            Live Preview Active
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

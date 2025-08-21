@@ -1,0 +1,20 @@
+# GENESIS Orchestrator - Minimal Required Dependencies
+# Only essential packages needed for the application to run
+
+# Core web framework dependencies
+requests>=2.31.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# Basic testing (optional)
+pytest>=7.4.0,<8.0.0
+
+# JSON handling
+jsonschema>=4.17.0,<5.0.0
+pyyaml>=6.0,<7.0
+
+# Basic utilities
+click>=8.1.0,<9.0.0
+tqdm>=4.65.0,<5.0.0
+
+# Note: sqlite3 is built into Python, no need to install
+# Note: Most dependencies are optional for basic functionality
