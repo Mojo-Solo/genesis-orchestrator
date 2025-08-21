@@ -1,0 +1,324 @@
+# GENESIS Orchestrator - Production Deployment Configuration
+# Phase 4.2: Production deployment automation
+
+# Deployment Strategy Configuration
+deployment:
+  strategy: "blue_green"  # Options: blue_green, rolling, canary
+  timeout_seconds: 600
+  health_check_timeout: 300
+  rollback_enabled: true
+  max_unavailable: "25%"
+  max_surge: "50%"
+
+# Environment Configuration
+environment:
+  name: "production"
+  domain: "genesis-orchestrator.production.domain.com"
+  ssl_enabled: true
+  maintenance_mode: false
+
+# Application Configuration
+application:
+  name: "genesis-orchestrator"
+  version: "1.0.0"
+  replicas: 3
+  min_replicas: 2
+  max_replicas: 10
+  
+  # Resource Limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# Database Configuration
+database:
+  host: "${DB_HOST}"
+  port: "${DB_PORT:-3306}"
+  name: "${DB_DATABASE}"
+  username: "${DB_USERNAME}"
+  password: "${DB_PASSWORD}"
+  
+  # Connection Pool Settings
+  pool:
+    min_connections: 5
+    max_connections: 20
+    idle_timeout: 300
+    
+  # Backup Configuration
+  backup:
+    enabled: true
+    retention_days: 7
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    compression: true
+
+# Cache Configuration (Redis)
+cache:
+  host: "${REDIS_HOST}"
+  port: "${REDIS_PORT:-6379}"
+  password: "${REDIS_PASSWORD}"
+  database: "${REDIS_DB:-0}"
+  
+  # Cluster Configuration
+  cluster:
+    enabled: false
+    nodes: []
+  
+  # Performance Settings
+  pool:
+    max_connections: 50
+    min_idle: 5
+    max_idle: 20
+
+# Load Balancer Configuration
+load_balancer:
+  type: "nginx"
+  ssl_redirect: true
+  health_check_path: "/api/health"
+  health_check_interval: 30
+  timeout: 30
+  
+  # Rate Limiting
+  rate_limit:
+    enabled: true
+    requests_per_minute: 1000
+    burst_limit: 100
+
+# Monitoring and Logging
+monitoring:
+  metrics:
+    enabled: true
+    endpoint: "/metrics"
+    prometheus_enabled: true
+    
+  logging:
+    level: "info"
+    format: "json"
+    output: "stdout"
+    
+  health_checks:
+    liveness_probe:
+      path: "/api/health"
+      initial_delay: 30
+      period: 10
+      timeout: 5
+      failure_threshold: 3
+      
+    readiness_probe:
+      path: "/api/ready"
+      initial_delay: 5
+      period: 5
+      timeout: 3
+      failure_threshold: 3
+
+# Security Configuration
+security:
+  # TLS Configuration
+  tls:
+    enabled: true
+    min_version: "1.2"
+    cipher_suites:
+      - "ECDHE-RSA-AES128-GCM-SHA256"
+      - "ECDHE-RSA-AES256-GCM-SHA384"
+      
+  # CORS Configuration
+  cors:
+    enabled: true
+    allowed_origins: 
+      - "https://genesis-orchestrator.production.domain.com"
+      - "https://admin.production.domain.com"
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization", "X-Requested-With"]
+    max_age: 3600
+
+# Performance Targets
+performance:
+  targets:
+    response_time_p95: 150  # milliseconds
+    throughput_rps: 200     # requests per second
+    availability: 99.9      # percentage
+    cache_hit_ratio: 85     # percentage
+    
+  # Auto-scaling Configuration
+  autoscaling:
+    enabled: true
+    cpu_threshold: 70       # percentage
+    memory_threshold: 80    # percentage
+    scale_up_cooldown: 60   # seconds
+    scale_down_cooldown: 300 # seconds
+
+# Feature Flags
+features:
+  advanced_caching: true
+  performance_optimization: true
+  real_time_metrics: true
+  circuit_breaker: true
+  rate_limiting: true
+  request_tracing: true
+
+# Integration Services
+integrations:
+  # External APIs
+  external_apis:
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 1000  # milliseconds
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5
+      timeout: 60000  # milliseconds
+      
+  # Message Queue (Redis)
+  queue:
+    driver: "redis"
+    connection: "default"
+    default_queue: "default"
+    retry_after: 90
+    
+  # File Storage
+  storage:
+    driver: "s3"
+    bucket: "${AWS_BUCKET}"
+    region: "${AWS_DEFAULT_REGION}"
+    
+# Deployment Hooks
+hooks:
+  pre_deploy:
+    - name: "database_backup"
+      command: "php artisan db:backup"
+      timeout: 300
+      
+    - name: "dependency_check"
+      command: "composer validate --strict"
+      timeout: 60
+      
+  post_deploy:
+    - name: "cache_warm"
+      command: "php artisan cache:warm"
+      timeout: 120
+      
+    - name: "health_check"
+      command: "curl -f http://localhost:8000/api/health"
+      timeout: 30
+      
+    - name: "performance_test"
+      command: "php artisan test:performance"
+      timeout: 180
+
+# Environment Variables Template
+environment_variables:
+  # Application
+  APP_NAME: "GENESIS Orchestrator"
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  APP_URL: "https://genesis-orchestrator.production.domain.com"
+  
+  # Database
+  DB_CONNECTION: "mysql"
+  DB_HOST: "${DB_HOST}"
+  DB_PORT: "${DB_PORT:-3306}"
+  DB_DATABASE: "${DB_DATABASE}"
+  DB_USERNAME: "${DB_USERNAME}"
+  DB_PASSWORD: "${DB_PASSWORD}"
+  
+  # Cache
+  CACHE_DRIVER: "redis"
+  REDIS_HOST: "${REDIS_HOST}"
+  REDIS_PORT: "${REDIS_PORT:-6379}"
+  REDIS_PASSWORD: "${REDIS_PASSWORD}"
+  
+  # Session
+  SESSION_DRIVER: "redis"
+  SESSION_LIFETIME: "120"
+  
+  # Queue
+  QUEUE_CONNECTION: "redis"
+  
+  # Logging
+  LOG_CHANNEL: "stack"
+  LOG_LEVEL: "info"
+  
+  # Performance
+  OPCACHE_ENABLED: "true"
+  PHP_MEMORY_LIMIT: "512M"
+  PHP_MAX_EXECUTION_TIME: "60"
+
+# Kubernetes Manifests
+kubernetes:
+  namespace: "genesis-production"
+  
+  # Deployment Configuration
+  deployment:
+    annotations:
+      deployment.kubernetes.io/revision: "1"
+    labels:
+      app: "genesis-orchestrator"
+      version: "blue"
+      environment: "production"
+      
+  # Service Configuration
+  service:
+    type: "ClusterIP"
+    port: 80
+    target_port: 8000
+    
+  # Ingress Configuration
+  ingress:
+    enabled: true
+    class: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+# Backup and Disaster Recovery
+backup:
+  database:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention_days: 30
+    compression: true
+    encryption: true
+    
+  application:
+    enabled: true
+    schedule: "0 3 * * *"  # Daily at 3 AM
+    retention_days: 7
+    exclude_patterns:
+      - "storage/logs/*"
+      - "storage/framework/cache/*"
+      - "node_modules/*"
+
+# Alerting Configuration
+alerting:
+  slack:
+    enabled: true
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channel: "#genesis-alerts"
+    
+  email:
+    enabled: true
+    smtp_host: "${SMTP_HOST}"
+    smtp_port: "${SMTP_PORT}"
+    recipients:
+      - "ops-team@company.com"
+      - "dev-team@company.com"
+      
+  conditions:
+    - name: "high_response_time"
+      metric: "http_request_duration_p95"
+      threshold: 200
+      duration: "5m"
+      
+    - name: "high_error_rate"
+      metric: "http_request_error_rate"
+      threshold: 5
+      duration: "2m"
+      
+    - name: "low_availability"
+      metric: "http_request_success_rate"
+      threshold: 95
+      duration: "1m"

@@ -1,0 +1,30 @@
+{
+  "mode": "development",
+  "ai_provider": "claude_code",
+  "reasoning_effort": "high",
+  "max_tool_calls": 10,
+  "auto_approve": false,
+  "tools": {
+    "frontend_preview": {
+      "enabled": true,
+      "script_path": "./preview.sh",
+      "default_port": 5500
+    },
+    "mcp_servers": {
+      "enabled": true,
+      "servers": [
+        "browser-preview"
+      ]
+    },
+    "code_execution": {
+      "enabled": true,
+      "sandbox": true
+    }
+  },
+  "project_paths": {
+    "root": ".",
+    "frontend": ".",
+    "backend": "./backend",
+    "docs": "."
+  }
+}

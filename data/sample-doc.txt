@@ -1,0 +1,19 @@
+# GENESIS Creator Meta-Agent System
+
+The GENESIS Creator is a dynamic sub-agent creation system designed for automated development tasks. It analyzes user requests and spawns appropriate sub-agents to handle complex workflows.
+
+## Key Features
+
+- Dynamic sub-agent spawning based on task analysis
+- Integration with CCPM project management system
+- Support for multiple programming languages and frameworks
+- Automated code generation and testing
+
+## Sub-Agent Types
+
+1. **Code Generator Agent**: Creates code files based on specifications
+2. **Test Runner Agent**: Executes tests and analyzes results
+3. **Documentation Agent**: Generates and maintains documentation
+4. **Deployment Agent**: Handles deployment and infrastructure tasks
+
+The system follows a meta-agent pattern where the main GENESIS Creator acts as an orchestrator, delegating specific tasks to specialized sub-agents for optimal performance and maintainability.

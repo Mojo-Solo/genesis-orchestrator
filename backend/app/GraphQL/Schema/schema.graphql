@@ -1,0 +1,658 @@
+# AI-Enhanced Project Management GraphQL Schema
+# Comprehensive schema for meetings, transcripts, analytics, and real-time features
+
+scalar DateTime
+scalar JSON
+scalar Upload
+
+# ====== TYPES ======
+
+type User {
+  id: ID!
+  email: String!
+  name: String!
+  role: UserRole!
+  avatar_url: String
+  settings: JSON
+  tenant: Tenant!
+  meetings: [Meeting!]! @paginate
+  created_at: DateTime!
+  updated_at: DateTime!
+  
+  # Computed fields
+  meeting_count: Int! @count(relation: "meetings")
+  recent_activity: [Activity!]! @hasMany(relation: "activities")
+  performance_metrics: UserPerformanceMetrics
+}
+
+type Tenant {
+  id: ID!
+  name: String!
+  slug: String!
+  tier: TenantTier!
+  status: TenantStatus!
+  settings: JSON
+  subscription: Subscription
+  users: [User!]! @hasMany
+  meetings: [Meeting!]! @hasMany
+  analytics: TenantAnalytics
+  quotas: TenantQuotas
+  created_at: DateTime!
+  updated_at: DateTime!
+}
+
+type Meeting {
+  id: ID!
+  title: String!
+  description: String
+  status: MeetingStatus!
+  scheduled_at: DateTime!
+  started_at: DateTime
+  ended_at: DateTime
+  duration_minutes: Int!
+  actual_duration_minutes: Int
+  meeting_url: String
+  participants: [Participant!]!
+  recordings: [Recording!]! @hasMany
+  transcripts: [Transcript!]! @hasMany
+  action_items: [ActionItem!]! @hasMany
+  insights: [Insight!]! @hasMany
+  analytics: MeetingAnalytics
+  user: User! @belongsTo
+  tenant: Tenant! @belongsTo
+  created_at: DateTime!
+  updated_at: DateTime!
+  
+  # Real-time fields
+  live_participants: [LiveParticipant!]!
+  live_transcript: LiveTranscript
+}
+
+type Transcript {
+  id: ID!
+  meeting_id: ID!
+  content: String!
+  language: String!
+  confidence_score: Float!
+  sentences: [TranscriptSentence!]!
+  metadata: JSON
+  ai_insights: AIInsights
+  processing_status: ProcessingStatus!
+  meeting: Meeting! @belongsTo
+  created_at: DateTime!
+  updated_at: DateTime!
+  
+  # Computed fields
+  word_count: Int!
+  speaker_count: Int!
+  sentiment_score: Float
+  key_topics: [String!]!
+}
+
+type Recording {
+  id: ID!
+  meeting_id: ID!
+  filename: String!
+  file_path: String!
+  format: String!
+  duration: Int!
+  file_size: Int!
+  upload_status: UploadStatus!
+  processing_status: ProcessingStatus!
+  meeting: Meeting! @belongsTo
+  created_at: DateTime!
+  
+  # Computed fields
+  download_url: String!
+  streaming_url: String
+}
+
+type ActionItem {
+  id: ID!
+  meeting_id: ID!
+  title: String!
+  description: String
+  assignee_name: String
+  assignee_email: String
+  due_date: DateTime
+  status: ActionItemStatus!
+  priority: Priority!
+  confidence_score: Float
+  extracted_from: String
+  meeting: Meeting! @belongsTo
+  created_at: DateTime!
+  updated_at: DateTime!
+}
+
+type Insight {
+  id: ID!
+  meeting_id: ID!
+  type: InsightType!
+  title: String!
+  content: String!
+  confidence_score: Float!
+  metadata: JSON
+  tags: [String!]!
+  meeting: Meeting! @belongsTo
+  created_at: DateTime!
+}
+
+# ====== ANALYTICS TYPES ======
+
+type TenantAnalytics {
+  meetings_count: Int!
+  total_duration_minutes: Int!
+  avg_meeting_duration: Float!
+  completion_rate: Float!
+  action_items_count: Int!
+  action_items_completion_rate: Float!
+  insights_generated: Int!
+  user_engagement_score: Float!
+  trends: TenantTrends!
+  top_performers: [UserPerformanceMetrics!]!
+}
+
+type MeetingAnalytics {
+  duration_analysis: DurationAnalysis!
+  participant_engagement: ParticipantEngagement!
+  speaking_distribution: [SpeakingDistribution!]!
+  sentiment_analysis: SentimentAnalysis!
+  topic_analysis: TopicAnalysis!
+  action_items_count: Int!
+  insights_count: Int!
+}
+
+type UserPerformanceMetrics {
+  user_id: ID!
+  meetings_hosted: Int!
+  meetings_attended: Int!
+  avg_meeting_duration: Float!
+  action_items_created: Int!
+  action_items_completed: Int!
+  engagement_score: Float!
+  productivity_score: Float!
+}
+
+# ====== REAL-TIME TYPES ======
+
+type LiveParticipant {
+  user_id: ID
+  name: String!
+  email: String
+  joined_at: DateTime!
+  is_speaking: Boolean!
+  audio_level: Float
+  video_enabled: Boolean!
+  screen_sharing: Boolean!
+}
+
+type LiveTranscript {
+  current_speaker: String
+  current_text: String!
+  confidence: Float!
+  is_final: Boolean!
+  timestamp: DateTime!
+}
+
+type SystemAlert {
+  id: ID!
+  type: String!
+  severity: AlertSeverity!
+  message: String!
+  context: JSON
+  status: AlertStatus!
+  tenant_id: ID
+  created_at: DateTime!
+  updated_at: DateTime!
+}
+
+# ====== SUBSCRIPTION TYPES ======
+
+type MeetingUpdate {
+  meeting: Meeting!
+  type: MeetingUpdateType!
+  data: JSON
+}
+
+type TranscriptUpdate {
+  meeting_id: ID!
+  sentence: TranscriptSentence
+  is_final: Boolean!
+  speaker: String
+  confidence: Float!
+  timestamp: DateTime!
+}
+
+type SystemMetric {
+  name: String!
+  value: Float!
+  timestamp: DateTime!
+  tenant_id: ID
+}
+
+# ====== ENUMS ======
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  USER
+  VIEWER
+}
+
+enum TenantTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum UploadStatus {
+  UPLOADING
+  COMPLETED
+  FAILED
+}
+
+enum ActionItemStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum InsightType {
+  KEY_TOPIC
+  SENTIMENT
+  ACTION_ITEM
+  DECISION
+  QUESTION
+  FOLLOW_UP
+  RISK
+  OPPORTUNITY
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  SUPPRESSED
+}
+
+enum MeetingUpdateType {
+  STATUS_CHANGED
+  PARTICIPANT_JOINED
+  PARTICIPANT_LEFT
+  RECORDING_STARTED
+  RECORDING_STOPPED
+  TRANSCRIPT_UPDATED
+}
+
+# ====== NESTED TYPES ======
+
+type Participant {
+  email: String!
+  name: String!
+  role: String
+  joined_at: DateTime
+  left_at: DateTime
+}
+
+type TranscriptSentence {
+  speaker: String!
+  text: String!
+  timestamp: String!
+  start_time: Float
+  end_time: Float
+  confidence: Float!
+}
+
+type AIInsights {
+  action_items: [ExtractedActionItem!]!
+  key_topics: [KeyTopic!]!
+  sentiment_analysis: SentimentAnalysis!
+  summary: String!
+  decisions_made: [String!]!
+  questions_raised: [String!]!
+}
+
+type ExtractedActionItem {
+  text: String!
+  assignee: String
+  due_date: String
+  priority: Priority
+  confidence: Float!
+}
+
+type KeyTopic {
+  topic: String!
+  confidence: Float!
+  frequency: Int!
+  context: [String!]!
+}
+
+type SentimentAnalysis {
+  overall_sentiment: String!
+  sentiment_score: Float!
+  sentiment_timeline: [SentimentTimepoint!]!
+  positive_highlights: [String!]!
+  negative_concerns: [String!]!
+}
+
+type SentimentTimepoint {
+  timestamp: String!
+  sentiment: Float!
+  speaker: String
+}
+
+type DurationAnalysis {
+  scheduled_duration: Int!
+  actual_duration: Int!
+  efficiency_score: Float!
+  overrun_minutes: Int
+}
+
+type ParticipantEngagement {
+  total_participants: Int!
+  avg_engagement_score: Float!
+  most_engaged: String
+  least_engaged: String
+  engagement_distribution: [EngagementScore!]!
+}
+
+type EngagementScore {
+  participant: String!
+  score: Float!
+  speaking_time_percentage: Float!
+}
+
+type SpeakingDistribution {
+  speaker: String!
+  speaking_time_seconds: Int!
+  percentage: Float!
+  words_spoken: Int!
+}
+
+type TopicAnalysis {
+  primary_topics: [String!]!
+  topic_transitions: [TopicTransition!]!
+  topic_sentiment: [TopicSentiment!]!
+}
+
+type TopicTransition {
+  from_topic: String!
+  to_topic: String!
+  timestamp: String!
+}
+
+type TopicSentiment {
+  topic: String!
+  sentiment_score: Float!
+}
+
+type TenantTrends {
+  meeting_frequency: String!
+  completion_rates: String!
+  engagement_trend: String!
+  productivity_trend: String!
+}
+
+type TenantQuotas {
+  monthly_meetings_limit: Int!
+  monthly_meetings_used: Int!
+  storage_limit_gb: Int!
+  storage_used_gb: Float!
+  users_limit: Int!
+  users_count: Int!
+}
+
+type Subscription {
+  id: ID!
+  status: String!
+  current_period_start: DateTime!
+  current_period_end: DateTime!
+  cancel_at_period_end: Boolean!
+  trial_end: DateTime
+}
+
+type Activity {
+  id: ID!
+  type: String!
+  description: String!
+  metadata: JSON
+  created_at: DateTime!
+}
+
+# ====== INPUT TYPES ======
+
+input CreateMeetingInput {
+  title: String!
+  description: String
+  scheduled_at: DateTime!
+  duration_minutes: Int!
+  meeting_url: String
+  participants: [ParticipantInput!]!
+}
+
+input UpdateMeetingInput {
+  title: String
+  description: String
+  scheduled_at: DateTime
+  duration_minutes: Int
+  meeting_url: String
+  participants: [ParticipantInput!]
+}
+
+input ParticipantInput {
+  email: String!
+  name: String!
+  role: String
+}
+
+input CreateActionItemInput {
+  meeting_id: ID!
+  title: String!
+  description: String
+  assignee_name: String
+  assignee_email: String
+  due_date: DateTime
+  priority: Priority!
+}
+
+input UpdateActionItemInput {
+  title: String
+  description: String
+  assignee_name: String
+  assignee_email: String
+  due_date: DateTime
+  priority: Priority
+  status: ActionItemStatus
+}
+
+input UploadRecordingInput {
+  meeting_id: ID!
+  file: Upload!
+  format: String!
+  duration: Int!
+}
+
+input MeetingFiltersInput {
+  status: MeetingStatus
+  date_from: DateTime
+  date_to: DateTime
+  search: String
+  user_id: ID
+}
+
+input AnalyticsFiltersInput {
+  date_from: DateTime!
+  date_to: DateTime!
+  user_ids: [ID!]
+  meeting_statuses: [MeetingStatus!]
+  include_deleted: Boolean
+}
+
+# ====== QUERIES ======
+
+type Query {
+  # User queries
+  me: User @auth
+  user(id: ID! @rules(apply: ["exists:users"])): User @auth @can(ability: "view", model: "User")
+  users(first: Int! @rules(apply: ["max:100"])): [User!]! @paginate @auth @can(ability: "viewAny", model: "User")
+  
+  # Meeting queries
+  meeting(id: ID! @rules(apply: ["exists:meetings"])): Meeting @auth @can(ability: "view", model: "Meeting")
+  meetings(
+    filters: MeetingFiltersInput
+    first: Int! @rules(apply: ["max:100"])
+  ): [Meeting!]! @paginate @auth
+  
+  # Transcript queries
+  transcript(id: ID! @rules(apply: ["exists:transcripts"])): Transcript @auth
+  transcripts(meeting_id: ID!): [Transcript!]! @auth
+  
+  # Analytics queries
+  tenant_analytics(filters: AnalyticsFiltersInput): TenantAnalytics @auth @can(ability: "viewAnalytics", model: "Tenant")
+  meeting_analytics(
+    meeting_id: ID! @rules(apply: ["exists:meetings"])
+    filters: AnalyticsFiltersInput
+  ): MeetingAnalytics @auth
+  user_performance(
+    user_id: ID
+    filters: AnalyticsFiltersInput
+  ): UserPerformanceMetrics @auth
+  
+  # Search queries
+  search_meetings(
+    query: String!
+    filters: MeetingFiltersInput
+    first: Int @rules(apply: ["max:50"])
+  ): [Meeting!]! @auth
+  search_transcripts(
+    query: String!
+    meeting_ids: [ID!]
+    first: Int @rules(apply: ["max:50"])
+  ): [Transcript!]! @auth
+  
+  # System queries
+  system_health: JSON @auth @can(ability: "viewSystemHealth")
+  system_metrics(
+    metrics: [String!]!
+    time_window: String
+  ): [SystemMetric!]! @auth @can(ability: "viewSystemMetrics")
+  alerts(
+    severity: AlertSeverity
+    status: AlertStatus
+    first: Int @rules(apply: ["max:100"])
+  ): [SystemAlert!]! @paginate @auth @can(ability: "viewAlerts")
+  
+  # Real-time queries
+  live_meeting(meeting_id: ID!): Meeting @auth
+  meeting_participants(meeting_id: ID!): [LiveParticipant!]! @auth
+}
+
+# ====== MUTATIONS ======
+
+type Mutation {
+  # Authentication mutations
+  login(email: String!, password: String!): AuthPayload
+  logout: Boolean @auth
+  refresh_token: AuthPayload @auth
+  
+  # Meeting mutations
+  create_meeting(input: CreateMeetingInput!): Meeting @auth @can(ability: "create", model: "Meeting")
+  update_meeting(id: ID!, input: UpdateMeetingInput!): Meeting @auth @can(ability: "update", model: "Meeting")
+  delete_meeting(id: ID!): Boolean @auth @can(ability: "delete", model: "Meeting")
+  
+  start_meeting(id: ID!): Meeting @auth @can(ability: "start", model: "Meeting")
+  end_meeting(id: ID!): Meeting @auth @can(ability: "end", model: "Meeting")
+  
+  # Recording mutations
+  upload_recording(input: UploadRecordingInput!): Recording @auth
+  process_recording(recording_id: ID!): Boolean @auth
+  
+  # Transcript mutations
+  process_meeting_transcript(meeting_id: ID!): Boolean @auth
+  update_transcript_sentence(
+    transcript_id: ID!
+    sentence_index: Int!
+    text: String!
+  ): Transcript @auth
+  
+  # Action item mutations
+  create_action_item(input: CreateActionItemInput!): ActionItem @auth
+  update_action_item(id: ID!, input: UpdateActionItemInput!): ActionItem @auth
+  complete_action_item(id: ID!): ActionItem @auth
+  delete_action_item(id: ID!): Boolean @auth
+  
+  # Insight mutations
+  generate_meeting_insights(meeting_id: ID!): [Insight!]! @auth
+  
+  # Alert mutations
+  acknowledge_alert(id: ID!): SystemAlert @auth @can(ability: "acknowledge", model: "SystemAlert")
+  resolve_alert(id: ID!, resolution_notes: String): SystemAlert @auth @can(ability: "resolve", model: "SystemAlert")
+  
+  # System mutations
+  trigger_system_health_check: JSON @auth @can(ability: "triggerHealthCheck")
+}
+
+# ====== SUBSCRIPTIONS ======
+
+type Subscription {
+  # Meeting subscriptions
+  meeting_updated(meeting_id: ID!): MeetingUpdate @auth @subscription(class: "App\\GraphQL\\Subscriptions\\MeetingUpdated")
+  meeting_participants_changed(meeting_id: ID!): [LiveParticipant!]! @auth
+  
+  # Transcript subscriptions
+  live_transcript(meeting_id: ID!): TranscriptUpdate @auth @subscription(class: "App\\GraphQL\\Subscriptions\\LiveTranscript")
+  transcript_processed(meeting_id: ID!): Transcript @auth
+  
+  # System subscriptions
+  system_alerts(severity: AlertSeverity): SystemAlert @auth @can(ability: "receiveAlerts")
+  system_metrics(metrics: [String!]!): SystemMetric @auth @can(ability: "receiveMetrics")
+  
+  # Real-time analytics
+  live_analytics(tenant_id: ID): TenantAnalytics @auth
+  performance_metrics: [SystemMetric!]! @auth @can(ability: "viewPerformanceMetrics")
+}
+
+type AuthPayload {
+  access_token: String!
+  refresh_token: String!
+  expires_in: Int!
+  token_type: String!
+  user: User!
+}

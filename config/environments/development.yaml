@@ -1,0 +1,77 @@
+# GENESIS DEVELOPMENT ENVIRONMENT OVERRIDES
+# Environment-specific configuration for development
+# Inherits from genesis.unified.yaml with development-specific overrides
+
+# ==============================================
+# DEVELOPMENT-SPECIFIC OVERRIDES
+# ==============================================
+
+# Relaxed Stability for Development
+stability:
+  target_percentage: 95.0  # Relaxed from production 98.6%
+  measurement_window: 50   # Reduced test runs for faster development
+  max_temperature: 0.2     # Allow more creativity in development
+
+# Development Security Settings
+security:
+  authentication:
+    mfa_required_for_admin: false  # Disabled for dev convenience
+    session_timeout_minutes: 480   # 8 hours for development
+  api_security:
+    rate_limiting:
+      requests_per_minute: 1000    # Higher limits for development
+      burst_size: 100
+  audit:
+    log_all_requests: false        # Reduced logging in development
+
+# Development Monitoring
+monitoring:
+  metrics:
+    sampling_rate: 0.1             # 10% sampling to reduce noise
+    export_interval_seconds: 60   # Less frequent exports
+    retention_days: 1              # Shorter retention
+  health_checks:
+    agent_health:
+      interval_seconds: 60         # Less frequent health checks
+
+# Development Database
+database:
+  connection: "mysql"
+  host: "localhost"
+  port: 3306
+  database: "genesis_development"
+  username: "${DB_USERNAME:-genesis_dev}"
+  password: "${DB_PASSWORD:-}"
+  
+# Development External Services (Mock/Local)
+integrations:
+  pinecone:
+    enabled: false               # Use local embeddings in development
+    mock_mode: true
+  openai:
+    rate_limits:
+      requests_per_minute: 100   # Lower limits to avoid costs
+      tokens_per_minute: 10000
+  fireflies:
+    enabled: false               # Use mock data in development
+    mock_transcripts: true
+  redis:
+    host: "localhost"
+    port: 6379
+    database: 1                  # Separate Redis DB for development
+
+# Development Artifact Generation
+artifacts:
+  generation:
+    compress_large_artifacts: false  # Easier debugging without compression
+    include_debug_info: true         # Extra debug information
+    
+# Development Resource Limits
+deployment:
+  resources:
+    memory_request: "256Mi"      # Lower resource requirements
+    memory_limit: "1Gi"
+    cpu_request: "100m"
+    cpu_limit: "500m"
+  autoscaling:
+    enabled: false               # No autoscaling in development

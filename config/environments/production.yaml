@@ -1,0 +1,219 @@
+# GENESIS PRODUCTION ENVIRONMENT OVERRIDES
+# Environment-specific configuration for production deployment
+# Inherits from genesis.unified.yaml with production-specific hardening
+
+# ==============================================
+# PRODUCTION-SPECIFIC OVERRIDES
+# ==============================================
+
+# Production Stability Requirements (EVALUATION READY)
+stability:
+  target_percentage: 98.6         # Full evaluation requirement
+  measurement_window: 100         # Complete test suite
+  max_temperature: 0.05           # Minimal temperature for maximum stability
+  variance_threshold: 0.014       # Strict 1.4% variance limit
+  
+# Production Security Hardening
+security:
+  authentication:
+    mfa_required_for_admin: true  # Mandatory MFA in production
+    session_timeout_minutes: 60   # Shorter sessions for security
+    failed_login_lockout: true
+    max_failed_attempts: 3
+    
+  api_security:
+    rate_limiting:
+      enabled: true
+      requests_per_minute: 100    # Standard production limits
+      burst_size: 20
+      ddos_protection: true
+    webhook_security:
+      hmac_validation: true       # Required in production
+      strict_timestamp_validation: true
+      
+  data_protection:
+    pii_detection: true           # Mandatory PII protection
+    pii_redaction: true
+    encryption_in_transit: true
+    encryption_at_rest: true
+    data_masking_enabled: true
+    
+  audit:
+    enabled: true
+    log_all_requests: true        # Full audit trail in production
+    pii_access_logging: true
+    compliance_reporting: true
+    retention_years: 7
+
+# Production Monitoring & Observability
+monitoring:
+  enabled: true
+  metrics:
+    sampling_rate: 1.0            # 100% sampling in production
+    export_interval_seconds: 15   # Frequent metrics export
+    retention_days: 30            # Extended retention
+    real_time_dashboards: true
+    
+  tracing:
+    enabled: true
+    trace_all_requests: true      # Full tracing in production
+    performance_analytics: true
+    
+  alerting:
+    enabled: true
+    critical_error_notification: true
+    performance_degradation_alerts: true
+    security_incident_alerts: true
+    
+  health_checks:
+    agent_health:
+      interval_seconds: 15        # Frequent health checks
+      timeout_ms: 3000           # Stricter timeouts
+      unhealthy_threshold: 2     # Faster failure detection
+      healthy_threshold: 1
+    system_health:
+      memory_usage_threshold: 0.75  # Conservative thresholds
+      cpu_usage_threshold: 0.70
+      disk_usage_threshold: 0.80
+      
+# Production Database Configuration
+database:
+  connection: "mysql"
+  host: "${DB_HOST}"
+  port: 3306
+  database: "${DB_DATABASE}"
+  username: "${DB_USERNAME}"
+  password: "${DB_PASSWORD}"
+  
+  # Production Database Settings
+  pool_size: 20
+  connection_timeout: 30
+  read_timeout: 60
+  write_timeout: 60
+  charset: "utf8mb4"
+  collation: "utf8mb4_unicode_ci"
+  
+  # Backup & Recovery
+  backup:
+    enabled: true
+    frequency: "daily"
+    retention_days: 30
+    cross_region_replication: true
+
+# Production External Integrations
+integrations:
+  pinecone:
+    enabled: true
+    namespace_isolation: true     # Strict tenant isolation
+    performance_tier: "p1"       # High performance tier
+    backup_enabled: true
+    
+  openai:
+    enabled: true
+    rate_limits:
+      requests_per_minute: 500    # Production quotas
+      tokens_per_minute: 150000
+    fallback_models: ["gpt-3.5-turbo"]  # Fallback options
+    
+  fireflies:
+    enabled: true
+    enterprise_features: true
+    compliance_mode: true
+    
+  redis:
+    enabled: true
+    cluster_mode: true            # Redis cluster for production
+    persistence_enabled: true
+    backup_enabled: true
+    ssl_enabled: true
+
+# Production Artifact Requirements (EVALUATION CRITICAL)
+artifacts:
+  enabled: true
+  validation:
+    required_artifacts_check: true      # Verify all artifacts generated
+    artifact_integrity_check: true     # Validate artifact integrity
+    digital_signatures: true           # Sign artifacts for verification
+  
+  generation:
+    auto_generate: true
+    include_run_id: true
+    include_correlation_id: true
+    include_performance_metrics: true
+    compress_large_artifacts: true
+    encrypt_sensitive_artifacts: true
+
+# Production Resource Configuration
+deployment:
+  strategy: "blue_green"
+  rollback_enabled: true
+  zero_downtime_deployment: true
+  
+  resources:
+    memory_request: "1Gi"         # Production resource requirements
+    memory_limit: "4Gi"
+    cpu_request: "500m"
+    cpu_limit: "2000m"
+    
+  autoscaling:
+    enabled: true
+    min_replicas: 3               # High availability
+    max_replicas: 20
+    target_cpu_utilization: 60   # Conservative scaling
+    target_memory_utilization: 70
+    scale_up_cooldown: 60
+    scale_down_cooldown: 300
+
+# Production Circuit Breakers & Resilience
+resilience:
+  circuit_breakers:
+    database:
+      failure_threshold: 3
+      timeout_ms: 30000
+      reset_timeout_ms: 60000
+    external_apis:
+      failure_threshold: 5
+      timeout_ms: 10000
+      reset_timeout_ms: 30000
+      
+  retry_policies:
+    max_retries: 3
+    backoff_strategy: "exponential"
+    jitter_enabled: true
+    
+  timeouts:
+    http_request: 30000
+    database_query: 10000
+    external_api: 15000
+
+# Production Compliance & Governance
+compliance:
+  gdpr:
+    enabled: true
+    data_protection_officer_contact: "${DPO_EMAIL}"
+    privacy_policy_url: "${PRIVACY_POLICY_URL}"
+    cookie_consent_required: true
+    
+  sox:
+    enabled: true
+    financial_controls: true
+    change_management: true
+    segregation_of_duties: true
+    
+  iso27001:
+    enabled: true
+    security_controls: true
+    risk_management: true
+    incident_response: true
+
+# Production Performance Targets
+performance:
+  sla:
+    availability: 99.9            # 99.9% uptime SLA
+    response_time_95th_percentile: 200  # 200ms response time
+    error_rate_threshold: 0.1     # 0.1% error rate threshold
+    
+  capacity:
+    concurrent_users: 10000       # Support 10k concurrent users
+    requests_per_second: 1000     # 1k RPS capacity
+    data_processing_throughput: "1GB/hour"

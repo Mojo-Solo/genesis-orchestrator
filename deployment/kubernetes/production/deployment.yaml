@@ -1,0 +1,528 @@
+# GENESIS Orchestrator - Production Deployment
+# Phase 4.2: Blue-Green deployment configuration
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genesis-orchestrator-blue
+  namespace: genesis-production
+  labels:
+    app: genesis-orchestrator
+    version: blue
+    environment: production
+    component: backend
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    genesis.orchestrator/deployment-strategy: "blue-green"
+    genesis.orchestrator/performance-target: "150ms-response"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 50%
+  selector:
+    matchLabels:
+      app: genesis-orchestrator
+      version: blue
+      environment: production
+  template:
+    metadata:
+      labels:
+        app: genesis-orchestrator
+        version: blue
+        environment: production
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security Context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      # Service Account
+      serviceAccountName: genesis-orchestrator
+      
+      # Image Pull Secrets
+      imagePullSecrets:
+        - name: docker-registry-secret
+      
+      # Init Containers
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.35
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z mysql-service 3306; do
+                echo "Waiting for MySQL..."
+                sleep 2
+              done
+              echo "MySQL is ready!"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+        
+        - name: wait-for-redis
+          image: busybox:1.35
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z redis-service 6379; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+              echo "Redis is ready!"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+        
+        - name: database-migration
+          image: genesis-orchestrator/backend:latest
+          command:
+            - php
+            - artisan
+            - migrate
+            - --force
+          envFrom:
+            - secretRef:
+                name: genesis-orchestrator-secrets
+            - configMapRef:
+                name: genesis-orchestrator-config
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+      
+      # Main Container
+      containers:
+        - name: genesis-orchestrator
+          image: genesis-orchestrator/backend:latest
+          imagePullPolicy: Always
+          
+          # Ports
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          
+          # Environment Variables
+          envFrom:
+            - secretRef:
+                name: genesis-orchestrator-secrets
+            - configMapRef:
+                name: genesis-orchestrator-config
+          
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: APP_DEBUG
+              value: "false"
+            - name: CONTAINER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          
+          # Resource Limits
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          
+          # Health Checks
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+          
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
+            successThreshold: 1
+          
+          # Volume Mounts
+          volumeMounts:
+            - name: app-storage
+              mountPath: /app/storage
+            - name: cache-volume
+              mountPath: /app/bootstrap/cache
+            - name: log-volume
+              mountPath: /app/storage/logs
+            - name: config-volume
+              mountPath: /app/config/production
+              readOnly: true
+          
+          # Security Context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+      
+      # Volumes
+      volumes:
+        - name: app-storage
+          persistentVolumeClaim:
+            claimName: genesis-orchestrator-storage
+        - name: cache-volume
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: log-volume
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: config-volume
+          configMap:
+            name: genesis-orchestrator-config
+            defaultMode: 0644
+      
+      # Node Selection
+      nodeSelector:
+        kubernetes.io/os: linux
+        node.kubernetes.io/instance-type: "standard"
+      
+      # Affinity Rules
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - genesis-orchestrator
+                topologyKey: kubernetes.io/hostname
+        
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+                  - key: node.kubernetes.io/instance-type
+                    operator: NotIn
+                    values:
+                      - spot
+      
+      # Tolerations
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+      
+      # Termination Grace Period
+      terminationGracePeriodSeconds: 60
+
+---
+# Green Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genesis-orchestrator-green
+  namespace: genesis-production
+  labels:
+    app: genesis-orchestrator
+    version: green
+    environment: production
+    component: backend
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    genesis.orchestrator/deployment-strategy: "blue-green"
+    genesis.orchestrator/performance-target: "150ms-response"
+spec:
+  replicas: 0  # Initially scaled to 0
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 50%
+  selector:
+    matchLabels:
+      app: genesis-orchestrator
+      version: green
+      environment: production
+  template:
+    metadata:
+      labels:
+        app: genesis-orchestrator
+        version: green
+        environment: production
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security Context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      # Service Account
+      serviceAccountName: genesis-orchestrator
+      
+      # Image Pull Secrets
+      imagePullSecrets:
+        - name: docker-registry-secret
+      
+      # Init Containers
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.35
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z mysql-service 3306; do
+                echo "Waiting for MySQL..."
+                sleep 2
+              done
+              echo "MySQL is ready!"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+        
+        - name: wait-for-redis
+          image: busybox:1.35
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z redis-service 6379; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+              echo "Redis is ready!"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+        
+        - name: database-migration
+          image: genesis-orchestrator/backend:latest
+          command:
+            - php
+            - artisan
+            - migrate
+            - --force
+          envFrom:
+            - secretRef:
+                name: genesis-orchestrator-secrets
+            - configMapRef:
+                name: genesis-orchestrator-config
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+      
+      # Main Container (identical to blue deployment)
+      containers:
+        - name: genesis-orchestrator
+          image: genesis-orchestrator/backend:latest
+          imagePullPolicy: Always
+          
+          # Ports
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          
+          # Environment Variables
+          envFrom:
+            - secretRef:
+                name: genesis-orchestrator-secrets
+            - configMapRef:
+                name: genesis-orchestrator-config
+          
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: APP_DEBUG
+              value: "false"
+            - name: CONTAINER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          
+          # Resource Limits
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          
+          # Health Checks
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+          
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
+            successThreshold: 1
+          
+          # Volume Mounts
+          volumeMounts:
+            - name: app-storage
+              mountPath: /app/storage
+            - name: cache-volume
+              mountPath: /app/bootstrap/cache
+            - name: log-volume
+              mountPath: /app/storage/logs
+            - name: config-volume
+              mountPath: /app/config/production
+              readOnly: true
+          
+          # Security Context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+      
+      # Volumes
+      volumes:
+        - name: app-storage
+          persistentVolumeClaim:
+            claimName: genesis-orchestrator-storage
+        - name: cache-volume
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: log-volume
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: config-volume
+          configMap:
+            name: genesis-orchestrator-config
+            defaultMode: 0644
+      
+      # Node Selection
+      nodeSelector:
+        kubernetes.io/os: linux
+        node.kubernetes.io/instance-type: "standard"
+      
+      # Affinity Rules
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - genesis-orchestrator
+                topologyKey: kubernetes.io/hostname
+        
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+                  - key: node.kubernetes.io/instance-type
+                    operator: NotIn
+                    values:
+                      - spot
+      
+      # Tolerations
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+      
+      # Termination Grace Period
+      terminationGracePeriodSeconds: 60

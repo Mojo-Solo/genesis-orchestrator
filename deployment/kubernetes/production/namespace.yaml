@@ -1,0 +1,15 @@
+# GENESIS Orchestrator - Production Namespace
+# Phase 4.2: Kubernetes production infrastructure
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: genesis-production
+  labels:
+    name: genesis-production
+    environment: production
+    managed-by: genesis-orchestrator
+  annotations:
+    kubernetes.io/managed-by: "genesis-orchestrator"
+    deployment.genesis/version: "1.0.0"
+    deployment.genesis/created: "2025-01-15T00:00:00Z"
